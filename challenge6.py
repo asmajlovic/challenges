@@ -54,11 +54,11 @@ if not os.path.isdir(args.directory):
 # [rackspace_cloud]
 # username = myusername
 # api_key = 01234567890abcdef
-# region = LON
+# region = ORD
 
 try:
     creds_file = os.path.expanduser("~/.rackspace_cloud_credentials")
-    pyrax.set_credential_file(creds_file, "LON")
+    pyrax.set_credential_file(creds_file, "ORD")
 except e.AuthenticationFailed:
     print ("ERROR: Authentication failed. Please check and confirm "
            "that the API username, key, and region are in place and correct.")
