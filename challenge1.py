@@ -22,121 +22,149 @@ from time import sleep
 import pyrax
 from pyrax import exceptions as e
 
-# Flag to signify if build errors were encountered
-errors = False
+# Location of pyrax configuration file
+CONFIGFILE = "~/.rackspace_cloud_credentials"
 
-# Add a preceding '0' to server hostnames ("prettyfication")
-def pretty_hostname(value):
-    if value < 10:
-        return "0" + str(value)
-    else:
-        return str(value)
+def main():
+    """
+    Challenge 1
+     -- Write a script that builds three 512 MB Cloud Servers following a
+        similar naming convention. (ie., web1, web2, web3) and returns the
+        IP and login credentials for each server.
+    """
+    # Variable to determine if build errors were encountered
+    ERRORS = False
 
-# Define the authentication credentials file location and request that pyrax
-# makes use of it. If not found, let the client/user know about it.
+    # Compile a list of available RAM sizes for use in argument parsing
+    # later on. The choices permitted will be made up of this list.
+    #    NOTE: Should revisit to make more dynamic for if and when
+    #          the list is updated
+    flavor_list = [512, 1024, 2048, 4096, 8192, 15360, 30720]
+    
+    # Define the script parameters (all are optional for the time being)
+    parser = argparse.ArgumentParser(description=("Cloud Server provisioning "
+                                                  "application"))
+    parser.add_argument("-p", "--prefix", action="store", required=False,
+                        metavar="SERVER_NAME_PREFIX", type=str,
+                        help=("Server name prefix (defaults to 'server' e.g. "
+                              "server1, server2, ...)"), default="server")
+    parser.add_argument("-r", "--region", action="store", required=False,
+                        metavar="REGION", type=str,
+                        help=("Region where servers should be built (defaults"
+                              " to 'ORD'"), choices=["ORD", "DFW", "LON"],
+                              default="ORD")
+    parser.add_argument("-i", "--image", action="store", required=False,
+                        metavar="SERVER_IMAGE", type=str,
+                        help=("Image ID to be used in server build (defaults"
+                              " to '8ae428cd-0490-4f3a-818f-28213a7286b0' - "
+                              "Debian Squeeze"),
+                              default="8ae428cd-0490-4f3a-818f-28213a7286b0")
+    parser.add_argument("-s", "--size", action="store", required=False,
+                        metavar="SERVER_RAM_SIZE", type=int,
+                        help=("Server RAM size in megabytes (defaults to "
+                              "'512')"), choices=flavor_list, default=512)
+    parser.add_argument("-c", "--count", action="store", required=False,
+                        metavar="SERVER_COUNT", type=int,
+                        help="Number of servers to build (defaults to 3)",
+                        choices=range(1,11), default=3)
 
-# Use a credential file in the following format:
-# [rackspace_cloud]
-# username = myusername
-# api_key = 01234567890abcdef
-# region = ORD
+    # Parse arguments (validate user input)
+    args = parser.parse_args()
 
-try:
-    creds_file = os.path.expanduser("~/.rackspace_cloud_credentials")
-    pyrax.set_credential_file(creds_file, "ORD")
-except e.AuthenticationFailed:
-    print ("ERROR: Authentication failed. Please check and confirm "
-           "that the API username, key, and region are in place and correct.")
-    exit(1)
-except e.FileNotFound:
-    print "ERROR: Credentials file '%s' not found" % (creds_file)
-    exit(1)
+    # Define the authentication credentials file location and request that
+    # pyrax makes use of it. If not found, let the client/user know about it.
 
-# Use a shorter Cloud Servers class reference string
-# This simplifies invocation later on (less typing)
-cs = pyrax.cloudservers
+    # Use a credential file in the following format:
+    # [rackspace_cloud]
+    # username = myusername
+    # api_key = 01234567890abcdef
+    # region = LON
 
-# Compile a list of available RAM sizes for use in argument parsing
-# later on. The choices permitted will be made up of this list.
-flavor_list = []
-for flavor in cs.flavors.list():
-    flavor_list.append(flavor.ram)
+    try:
+        creds_file = os.path.expanduser(CONFIGFILE)
+        pyrax.set_credential_file(creds_file, args.region)
+    except e.AuthenticationFailed:
+        print ("ERROR: Authentication failed. Please check and confirm "
+               "that the API username, key, and region are in place "
+               "and correct.")
+        exit(1)
+    except e.FileNotFound:
+        print "ERROR: Credentials file '%s' not found" % (creds_file)
+        exit(2)
 
-# Define the script parameters (all are optional for the time being)
-parser = argparse.ArgumentParser(description=("Cloud Server provisioning "
-                                              "application"))
-parser.add_argument("-p", "--prefix", action="store", required=False,
-                    metavar="SERVER_NAME_PREFIX", type=str,
-                    help=("Server name prefix (defaults to 'server' e.g. "
-                          "server01, server02, ...)"), default="server")
-parser.add_argument("-s", "--size", action="store", required=False,
-                    metavar="SERVER_RAM_SIZE", type=int,
-                    help=("Server flavor (RAM size in megabytes, defaults "
-                          "to '512')"), choices=flavor_list, default=512)
-parser.add_argument("-c", "--count", action="store", required=False,
-                    metavar="SERVER_COUNT", type=int,
-                    help="Number of servers to build (defaults to 3)",
-                    choices=range(1,21), default=3)
+    # Use a shorter Cloud Servers class reference string
+    # This simplifies invocation later on (less typing)
+    cs = pyrax.cloudservers
 
-# Parse arguments (validate user input)
-args = parser.parse_args()
+    # Locate the image to build from (confirm it exists)
+    try:
+        image = [i for i in cs.images.list() if args.image in i.id][0]
+    except:
+        print ("ERROR: Image ID provided was not found. Please check "
+               "and try again")
+        exit(3)
 
-print ("Cloud Server build request initiated\n"
-       "TIP: You may wish to check available options by issuing the -h flag")
-       
-# Locate the image to build from.
-# Debian 6 images appear to lead to quickest build time completions (for now)
-image = [i for i in cs.images.list() if "Squeeze" in i.name][0]
+    # Grab the flavor ID from the RAM amount selected by the user.
+    # The server create request requires the ID rather than RAM amount.
+    flavor = [f for f in cs.flavors.list() if args.size == f.ram][0]
 
-# Grab the flavor ID from the RAM amount selected by the user.
-# The server create request requires the ID rather than RAM amount.
-flavor = [f for f in cs.flavors.list() if args.size == f.ram][0]
+    print ("Cloud Server build request initiated\n"
+           "TIP: You may wish to check available options by issuing "
+           "the -h/--help flag\n")
 
-# Print the image ID and name selected, as well as server count
-print "Image ID: %s\nImage name: %s" % (image.id, image.name)
-print "Server size: %d MB" % (args.size)
-print "Number of servers to be created:", args.count
+    # Print the image ID and name selected, as well as server count
+    print "-- Image details\n\tID: %s\n\tName: %s" % (image.id, image.name)
+    print ("\n-- Server build details\n\tSize: %d MB\n\tCount: %d"
+           % (args.size, args.count))
 
-# Server list definition to be used in tracking build status/comletion
-ids = []
+    # Server list definition to be used in tracking build status/comletion
+    servers = []
 
-# Iterate through the server count specified, sending the build request
-# for each one in turn (concurrent builds)
-count = 1
-while count <= args.count:
-    # Issue the server creation request
-    server = cs.servers.create(args.prefix + pretty_hostname(count),
-                               image.id, flavor.id)
-    # Add the server ID from the create request output to the tracking list
-    ids.append(server.id)
-    count += 1
-
-# Check on the status of the server builds. Completed or error/unknown
-# states are removed from the list until nothing remains.
-while ids:
-    # Track the element position for easier/efficient removal
-    count = 0
-    for id in ids:
-        # Get the server details for the ID in question
-        server = cs.servers.get(id)
-        # Should it meet the necessary criteria, provide extended info
-        # and remove from the list
-        if server.status in ["ACTIVE", "ERROR", "UNKNOWN"]:
-            print "Server name: %s, Status: %s" % (server.name, server.status)
-            if server.status == "ACTIVE":
-                print "Networks: %s" % (server.networks)
-            else:
-                errors = True
-                print "WARNING: Something went wrong with the build request"
-                print "Please review the server state"
-            del ids[count]
+    # Iterate through the server count specified, sending the build request
+    # for each one in turn (concurrent builds)
+    count = 1
+    while count <= args.count:
+        # Issue the server creation request
+        srv = cs.servers.create(args.prefix + str(count),
+                                   image.id, flavor.id)
+        # Add server ID from the create request to the tracking list
+        servers.append(srv)
         count += 1
-    # Reasonable wait period between checks
-    sleep(15)
 
-# All done
-exit_msg = "Build requests completed"
-if errors:
-    print "%s - with errors (see above for details)" % (exit_msg)
-else:
-    print "%s" % (exit_msg)
+    # Check on the status of the server builds. Completed or error/unknown
+    # states are removed from the list until nothing remains.
+    while servers:
+        # Track the element position for easier/efficient removal
+        count = 0
+        for server in servers:
+            # Get the updated server details
+            server.get()
+            # Should it meet the necessary criteria, provide extended info
+            # and remove from the list
+            if server.status in ["ACTIVE", "ERROR", "UNKNOWN"]:
+                print ("\n-- Server details:\n\tName: %s\n\tStatus: %s"
+                       "\n\tAdmin password: %s"
+                      % (server.name, server.status, server.adminPass))
+                print ("\tNetworks:\n\t\tPublic #1: %s\n\t\t"
+                       "Public #2: %s\n\t\tPrivate: %s"
+                       % (server.networks["public"][0],
+                          server.networks["public"][1],
+                          server.networks["private"][0]))
+                if server.status not in ["ACTIVE"]:
+                    ERRORS = True
+                    print "WARN: Something went wrong with the build request"
+                del servers[count]
+            count += 1
+        # Reasonable wait period between checks
+        sleep(15)
+
+    # All done
+    exit_msg = "\nBuild requests completed"
+    if ERRORS:
+        print "%s - with errors (see above for details)" % (exit_msg)
+    else:
+        print "%s" % (exit_msg)
+
+
+if __name__ == '__main__':
+    main()
