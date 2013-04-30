@@ -23,7 +23,7 @@ import pyrax
 from pyrax import exceptions as e
 
 # Location of pyrax configuration file
-CONFIGFILE = "~/.rackspace_cloud_credentials"
+CONFIG_FILE = "~/.rackspace_cloud_credentials"
 
 def main():
     """
@@ -81,7 +81,7 @@ def main():
     # region = LON
 
     try:
-        creds_file = os.path.expanduser(CONFIGFILE)
+        creds_file = os.path.expanduser(CONFIG_FILE)
         pyrax.set_credential_file(creds_file, args.region)
     except e.AuthenticationFailed:
         print ("ERROR: Authentication failed. Please check and confirm "
