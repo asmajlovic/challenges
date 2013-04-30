@@ -23,155 +23,169 @@ from time import sleep
 import pyrax
 from pyrax import exceptions as e
 
-# Function to return current zones under the account in question
+# Location of pyrax configuration file
+CONFIG_FILE = "~/.rackspace_cloud_credentials"
+
+# Default TTL value
+DEFAULT_TTL = 300
+
 def zone_list(obj):
-    # Use a paginated request format, in case there is a significant zone count
-    page_size = 25
-    count = 0
+    """
+    Return all zones under an account
+    """
+    # Get and return the zone list
+    doms = obj.list()
+    return doms
 
-    # Determine if any zones actually exist under the account, if not, request
-    # that one be created
-    doms = obj.list(limit=page_size)
-    count += len(doms)
 
-    # Loop until all zones have been considered
-    while True:
-        try:
-            doms = obj.list_next_page()
-            count += len(doms)
-        except e.NoMoreResults:
-            break
+def is_int(val, limit):
+    """
+    Determine if value provided is an integer greater than or equal to limit
+    """
+    try:
+        val = int(val)
+        if val < limit:
+            val = None
+    except ValueError:
+        val = None
+    return val
 
-    # Return the domains and count
-    return (doms, count)
 
-# We may be asking for a TTL a few times, here's the function to handle it
-def get_ttl(rec_type):
-    ttl = None
-    
-    while not ttl:
-        try:
-            ttl = int(raw_input("Please enter the %s record TTL (in seconds): "
-                                 % (rec_type)))
-            # User could potentially provide a negative integer, check to make
-            # sure TTL is at least 300 seconds
-            if ttl < 300:
-                print "Invalid selection. TTL must be at least 300s (5 min)"
-                ttl = None
-        except ValueError:
-            print "TTL must be a positive integer >300, please try again."
-    return ttl
-
-# Determine whether or not the IPv4 address provided is correctly structured
 def is_valid_ipv4(address):
+    """
+    Determine whether or not the IPv4 address provided is correctly structured
+    """
     try:
         addr = socket.inet_pton(socket.AF_INET, address)
     except AttributeError:
         try:
             addr = socket.inet_aton(address)
         except socket.error:
-            print "Invalid IP address specified, please try again"
             return False
         return address.count('.') == 3
     except socket.error:
-        print "Invalid IP address specified, please try again"
         return False
-
     return True
+
+
+def main():
+    """
+    Challenge 4
+    -- Write a script that uses Cloud DNS to create a new A record when
+       passed a FQDN and IP address as arguments.
+    """
+    # Parse script parameters
+    parser = argparse.ArgumentParser(description=("Create an A record using "
+                                                  "FQDN and IP address "
+                                                   "parameters"))
+    parser.add_argument("-f", "--fqdn", action="store",
+                        required=True, type=str, metavar="FQDN",
+                        help="Fully qualified domain name for A record")
+    parser.add_argument("-i", "--ip", action="store",
+                        required=True, type=str, metavar="IP_ADDRESS",
+                        help="IP address to which A record will resolve to")
+    parser.add_argument("-r", "--region", action="store", required=False,
+                            metavar="REGION", type=str,
+                            help=("Region where container should be created "
+                                  "(defaults to 'ORD'"),
+                                  choices=["ORD", "DFW", "LON"],
+                                  default="ORD")
+    parser.add_argument("-t", "--ttl", action="store",
+                        required=False, type=int, metavar="TTL_VALUE",
+                        help=("TTL for the new record (default %ds)"
+                             % (DEFAULT_TTL)), default=DEFAULT_TTL)
+
+    # Parse arguments (validate user input)
+    args = parser.parse_args()
+
+    # Determine if IP address provided is formatted correctly
+    if not is_valid_ipv4(args.ip):
+        print ("ERROR: IP address provided is incorrectly formated, please "
+               "check and try again")
+        exit(1)
+
+    # Determine if the FQDN is correctly formated (at least three segments
+    # separated by '.' are required).
+    #    NOTE: This can be improved since we're not checking whether or not
+    #          the zone in question is a valid TLD or if the string only has
+    #          valid (alphanumeric) characters
+    segments = args.fqdn.split('.')
+    if len(segments) < 3:
+        print ("ERROR: FQDN string is incorrectly formatted, please check "
+               "and try again")
+        print ("Base zone/domain in the format 'example.com' will not be "
+               "accepted")
+        exit(2)
+    # All is apparently well, define the zone/domain using the FQDN string
+    else:
+        zone_name = '.'.join(segments[-(len(segments)-1):])
     
-# Define the authentication credentials file location and request that pyrax
-# makes use of it. If not found, let the client/user know about it.
+    # If TTL has been provided, confirm that it is valid
+    if args.ttl:
+        ttl = is_int(args.ttl, DEFAULT_TTL)
+        if not ttl:
+            print ("ERROR: TTL must be an integer greater or equal to %d"
+                   % (DEFAULT_TTL))
+            exit(3)
+    else:
+        ttl = DEFAULT_TTL
 
-# Use a credential file in the following format:
-# [rackspace_cloud]
-# username = myusername
-# api_key = 01234567890abcdef
-# region = ORD
+    # Define the authentication credentials file location and request that
+    # pyrax makes use of it. If not found, let the client/user know about it.
 
-try:
-    creds_file = os.path.expanduser("~/.rackspace_cloud_credentials")
-    pyrax.set_credential_file(creds_file, "ORD")
-except e.AuthenticationFailed:
-    print ("ERROR: Authentication failed. Please check and confirm "
-           "that the API username, key, and region are in place and correct.")
-    exit(1)
-except e.FileNotFound:
-    print "ERROR: Credentials file '%s' not found" % (creds_file)
-    exit(1)
+    # Use a credential file in the following format:
+    # [rackspace_cloud]
+    # username = myusername
+    # api_key = 01234567890abcdef
+    # region = LON
 
-# Use a shorter Cloud DNS class reference string
-# This simplifies invocation later on (less typing)
-dns = pyrax.cloud_dns
-
-# Intro and check for zones
-print "-- Application to add an A record to Cloud DNS zone"
-(domains, count) = zone_list(dns)
-
-# No zones found, request that one be created
-if count == 0:
-    print "You have no domains/zones at this time"
-    zone_name = raw_input("Please enter a zone name to create: ")
-    emailadd = raw_input("Please enter an e-mail contact for the zone: ")
-    ttl = get_ttl("NS")
-    # Try and create the new zone
     try:
-        zone = dns.create(name=zone_name, emailAddress=emailadd,
-                ttl=ttl, comment="Created through pyrax")
-    except e.DomainCreationFailed as err:
-        print "Zone creation failed:", err
-    print "Zone created:", zone.name
-# Zones found, enumerate and request client/user selects which one to use
-else:
-    print "Available zones/domains:"
-    for pos, zn in enumerate(domains):
-        print "%2d) %s" % (pos, zn.name)
-    # Keep requesting until a valid selection is made
-    zone = None
-    while not zone:
-        try:
-            val = int(raw_input("Select a zone to add A record to: "))
-            # User could potentially provide a negative integer, which will
-            # still be a valid index reference - including a crude catch here
-            if val < 0:
-                print "Invalid selection. Please try again."
-                zone = None
-            else:
-                zone = domains[val]
-        except IndexError:
-            print "Invalid selection. Please try again."
-        except ValueError:
-            print "Selection must be an integer listed above, please try again."
+        creds_file = os.path.expanduser(CONFIG_FILE)
+        pyrax.set_credential_file(creds_file, args.region)
+    except e.AuthenticationFailed:
+        print ("ERROR: Authentication failed. Please check and confirm "
+               "that the API username, key, and region are in place and correct.")
+        exit(4)
+    except e.FileNotFound:
+        print "ERROR: Credentials file '%s' not found" % (creds_file)
+        exit(5)
 
-# We have determineded where the record needs to be added, request the
-# subdomain from the user/client
-print "Subdomain prefix required to complete the record creation"
-print "\tIt will be added to the zone selected/created above"
-prefix = raw_input("Please enter the prefix for the record (e.g. 'mail'\n"
-                    "\tor nothing/<RETURN> if it is the base record): ")
+    # Use a shorter Cloud DNS class reference string
+    # This simplifies invocation later on (less typing)
+    dns = pyrax.cloud_dns
 
-# Determine if a prefix was provided and adjust accordingly
-if prefix:
-    subdomain = prefix + "." + zone.name
-else:
-    subdomain = zone.name
+    # Grab zone list
+    domains = zone_list(dns)
 
-# Grab the IPv4 address and ttl for the new record
-ip = raw_input("Please enter a valid IPv4 address to resolve to: ")
-while not is_valid_ipv4(ip):
-    ip = raw_input("Please enter a valid IPv4 address to resolve to: ")
+    # No zones found, inform that one needs to be created and exit
+    if len(domains) == 0:
+        print "ERROR: You have no domains/zones at this time"
+        print "Please create one first then try again"
+        exit(6)
 
-ttl = get_ttl("A")
+    # Attempt to locate the zone extracted from FQDN string
+    try:
+        zone = [i for i in domains if zone_name in i.name][0]
+    except:
+        print "ERROR: Zone '%s' not found" % (zone_name)
+        print "Please check/create and try again"
+        exit(7)
 
-# Attempt to create the new A record
-a_rec = {"type": "A",
-        "name": subdomain,
-        "data": ip,
-        "ttl": ttl}
+    # Attempt to add the new A record
+    a_rec = {"type": "A",
+            "name": args.fqdn,
+            "data": args.ip,
+            "ttl": ttl}
 
-try:
-    rec = zone.add_record(a_rec)
-    print ("-- Record details\n\tName: %s\n\tType: %s\n\tIP address: %s\n\t"
-           "TTL: %s") % (rec[0].name, rec[0].type, rec[0].data, rec[0].ttl)
-    print "Complete"
-except e.DomainRecordAdditionFailed as err:
-    print "Record creation failed:", err
+    try:
+        rec = zone.add_record(a_rec)
+        print "Successfully added"
+        print ("-- Record details\n\tName: %s\n\tType: %s\n\tIP address: "
+               "%s\n\tTTL: %s") % (rec[0].name, rec[0].type, rec[0].data,
+               rec[0].ttl)
+    except e.DomainRecordAdditionFailed as err:
+        print "ERROR: Record addition request failed:", err
+
+
+if __name__ == '__main__':
+    main()
