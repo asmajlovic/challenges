@@ -16,195 +16,222 @@
 
 import argparse
 import os
-import sys
+from sys import exit
 from time import sleep
 
 import pyrax
 from pyrax import exceptions as e
 
-# Basic image selection/definition string (Debian) to be used in builds
-preferred_image = "Squeeze"
+# Location of pyrax configuration file
+CONFIG_FILE = "~/.rackspace_cloud_credentials"
 
-# Flag to signify if build errors were encountered
-errors = False
+def main():
+    """
+    Challenge 7
+    -- Write a script that will create 2 Cloud Servers and add them as nodes
+       to a new Cloud Load Balancer.
+    """
+    # Variable to determine if build errors were encountered
+    ERRORS = False
 
-# Add a preceding '0' to server hostnames ("prettyfication")
-def pretty_hostname(value):
-    if value < 10:
-        return "0" + str(value)
-    else:
-        return str(value)
+    # Compile a list of available RAM sizes for use in argument parsing
+    # later on. The choices permitted will be made up of this list.
+    #    NOTE: Should revisit to make more dynamic for if and when
+    #          the list is updated
+    FLAVOR_LIST = [ 512, 1024, 2048, 4096, 8192, 15360, 30720 ]
+    
+    # Compile a list of available LB algorithms (similar to above)
+    ALG_LIST = ["LEAST_CONNECTIONS", "RANDOM", "ROUND_ROBIN",
+                "WEIGHTED_LEAST_CONNECTIONS", "WEIGHTED_ROUND_ROBIN"]
 
-# Define the authentication credentials file location and request that pyrax
-# makes use of it. If not found, let the client/user know about it.
+    # Define the script parameters (all are optional for the time being)
+    parser = argparse.ArgumentParser(description=("Provisioning Cloud Servers"
+                                                  " behind HTTP LB"))
+    parser.add_argument("-x", "--prefix", action="store", required=False,
+                        metavar="SERVER_NAME_PREFIX", type=str,
+                        help=("Server name prefix (defaults to 'server' e.g."
+                              " server01, server02, ...)"), default="server")
+    parser.add_argument("-s", "--size", action="store", required=False,
+                        metavar="SERVER_RAM_SIZE", type=int,
+                        help=("Server flavor (RAM size in MB, defaults to "
+                              "'512')"), choices=FLAVOR_LIST, default=512)
+    parser.add_argument("-i", "--image", action="store", required=False,
+                        metavar="SERVER_IMAGE", type=str,
+                        help=("Image ID to be used in server build (defaults"
+                              " to '8ae428cd-0490-4f3a-818f-28213a7286b0' - "
+                              "Debian Squeeze"),
+                              default="8ae428cd-0490-4f3a-818f-28213a7286b0")
+    parser.add_argument("-c", "--count", action="store", required=False,
+                        metavar="SERVER_COUNT", type=int,
+                        help="Number of servers to build (defaults to 2)",
+                        choices=range(1,11), default=2)
+    parser.add_argument("-n", "--lb-name", action="store", required=False,
+                        metavar="LB_NAME", type=str,
+                        help=("Preferred LB name (defaults to server prefix)"
+                              " with '-lb' appended)"))
+    parser.add_argument("-t", "--lb-vip-type", action="store",
+                        required=False, metavar="LB_VIP_TYPE", type=str,
+                        help=("Virtual IP address type - PUBLIC or "
+                              "SERVICENET (defaults to PUBLIC)"),
+                              choices=["PUBLIC","SERVICENET"],
+                              default="PUBLIC")
+    parser.add_argument("-a", "--algorithm", action="store", required=False,
+                        metavar="LB_ALGORITHM", type=str,
+                        help="Load balancing algoritm (defaults to RANDOM)",
+                              choices=ALG_LIST, default="RANDOM")
+    parser.add_argument("-p", "--service-port", action="store",
+                        required=False, metavar="LB_PORT", type=int,
+                        help="Service port - HTTP (defaults to 80)",
+                        default=80)
+    parser.add_argument("-r", "--region", action="store", required=False,
+                            metavar="REGION", type=str,
+                            help=("Region where container should be created"
+                                  " (defaults to 'ORD'"),
+                                  choices=["ORD", "DFW", "LON"],
+                                  default="ORD")
 
-# Use a credential file in the following format:
-# [rackspace_cloud]
-# username = myusername
-# api_key = 01234567890abcdef
-# region = ORD
+    # Parse arguments (validate user input)
+    args = parser.parse_args()
 
-try:
-    creds_file = os.path.expanduser("~/.rackspace_cloud_credentials")
-    pyrax.set_credential_file(creds_file, "ORD")
-except e.AuthenticationFailed:
-    print ("ERROR: Authentication failed. Please check and confirm "
-           "that the API username, key, and region are in place and correct.")
-    sys.exit(1)
-except e.FileNotFound:
-    print "ERROR: Credentials file '%s' not found" % (creds_file)
-    sys.exit(1)
+    # Define the authentication credentials file location and request that pyrax
+    # makes use of it. If not found, let the client/user know about it.
 
-# Use a shorter Cloud Servers and LB class reference strings
-# This simplifies invocation later on (less typing)
-cs = pyrax.cloudservers
-clb = pyrax.cloud_loadbalancers
+    # Use a credential file in the following format:
+    # [rackspace_cloud]
+    # username = myusername
+    # api_key = 01234567890abcdef
+    # region = LON
 
-# Compile a list of available RAM sizes for use in argument parsing
-# later on. The choices permitted will be made up of this list.
-flavor_list = []
-for flavor in cs.flavors.list():
-    flavor_list.append(flavor.ram)
+    try:
+        creds_file = os.path.expanduser(CONFIG_FILE)
+        pyrax.set_credential_file(creds_file, args.region)
+    except e.AuthenticationFailed:
+        print ("ERROR: Authentication failed. Please check and confirm "
+               "that the API username, key, and region are in place and "
+               "correct.")
+        exit(1)
+    except e.FileNotFound:
+        print "ERROR: Credentials file '%s' not found" % (creds_file)
+        exit(2)
 
-# Complile a list of available LB algorithms for use in argument parsing.
-# Similar to above
-alg_list = []
-for alg in clb.algorithms:
-    alg_list.append(alg)
-
-# Define the script parameters (all are optional for the time being)
-parser = argparse.ArgumentParser(description=("Cloud Servers behind HTTP LB - "
-                                              "Provisioning application"))
-parser.add_argument("-x", "--prefix", action="store", required=False,
-                    metavar="SERVER_NAME_PREFIX", type=str,
-                    help=("Server name prefix (defaults to 'server' e.g. "
-                          "server01, server02, ...)"), default="server")
-parser.add_argument("-s", "--size", action="store", required=False,
-                    metavar="SERVER_RAM_SIZE", type=int,
-                    help=("Server flavor (RAM size in megabytes, defaults "
-                          "to '512')"), choices=flavor_list, default=512)
-parser.add_argument("-c", "--count", action="store", required=False,
-                    metavar="SERVER_COUNT", type=int,
-                    help="Number of servers to build (defaults to 2)",
-                    choices=range(1,21), default=2)
-parser.add_argument("-n", "--lb-name", action="store", required=False,
-                    metavar="LB_NAME", type=str,
-                    help="Preferred LB name (defaults to random string)",
-                    default=pyrax.utils.random_name(length=8, ascii_only=True))
-parser.add_argument("-t", "--lb-vip-type", action="store", required=False,
-                    metavar="LB_VIP_TYPE", type=str,
-                    help=("Virtual IP address type - PUBLIC or SERVICENET "
-                          "(defaults to PUBLIC)"),
-                          choices=["PUBLIC","SERVICENET"], default="PUBLIC")
-parser.add_argument("-a", "--algorithm", action="store", required=False,
-                    metavar="LB_ALGORITHM", type=str,
-                    help="Load balancing algoritm (defaults to RANDOM)",
-                          choices=alg_list, default="RANDOM")
-parser.add_argument("-p", "--service-port", action="store", required=False,
-                    metavar="LB_PORT", type=int,
-                    help="Service port - HTTP (defaults to 80)",
-                    default=80)
-
-# Parse arguments (validate user input)
-args = parser.parse_args()
-
-print ("Cloud Server build request initiated\n"
-       "TIP: You may wish to check available options by issuing the -h flag")
+    # Use a shorter Cloud Servers and LB class reference strings
+    # This simplifies invocation later on (less typing)
+    cs = pyrax.cloudservers
+    clb = pyrax.cloud_loadbalancers
        
-# Locate the image to build from.
-# Debian 6 images appear to lead to quickest build time completions (for now)
-image = [i for i in cs.images.list() if preferred_image in i.name][0]
+    # Locate the image to build from (confirm it exists)
+    try:
+        image = [i for i in cs.images.list() if args.image in i.id][0]
+    except:
+        print ("ERROR: Image ID provided was not found. Please check "
+               "and try again")
+        exit(3)
 
-# Grab the flavor ID from the RAM amount selected by the user.
-# The server create request requires the ID rather than RAM amount.
-flavor = [f for f in cs.flavors.list() if args.size == f.ram][0]
+    # Grab the flavor ID from the RAM amount selected by the user.
+    # The server create request requires the ID rather than RAM amount.
+    flavor = [f for f in cs.flavors.list() if args.size == f.ram][0]
+    
+    # Determine the LB name from the args provided
+    if args.lb_name:
+        lbname = args.lb_name
+    else:
+        lbname = args.prefix + "-lb"
 
-# Print the image ID and name selected, as well as server count
-print "-- Image details --\n\tID: %s\n\tName: %s" % (image.id, image.name)
-print ("-- Server build details --\n\tSize: %d MB\n\tNode count: %d"
-       % (args.size, args.count))
+    print ("\nCloud Server build request initiated\n"
+           "TIP: You may wish to check available options by issuing "
+           "the -h flag")
 
-# Server list definition to be used in tracking build status/comletion
-ids = []
+    # Print the image ID and name selected, as well as server count
+    print "\n-- Image details\n\tID: %s\n\tName: %s" % (image.id, image.name)
+    print ("\n-- Server build details\n\tSize: %d MB\n\tCount: %d"
+           % (args.size, args.count))
 
-# LB ID definition for later reference
-lb_id = None
+    # Server list definition to be used in tracking build status/comletion
+    servers = []
 
-# Iterate through the server count specified, sending the build request
-# for each one in turn (concurrent builds)
-print "Building servers..."
-count = 1
-while count <= args.count:
-    # Issue the server creation request
-    server = cs.servers.create(args.prefix + pretty_hostname(count),
-                               image.id, flavor.id)
-    # Add the server ID from the create request output to the tracking list
-    ids.append(server.id)
-    count += 1
+    # Iterate through the server count specified, sending the build request
+    # for each one in turn (concurrent builds)
+    count = 1
+    while count <= args.count:
+        # Issue the server creation request
+        srv = cs.servers.create(args.prefix + str(count),
+                                   image.id, flavor.id)
+        # Add server ID from the create request to the tracking list
+        servers.append(srv)
+        count += 1
 
-# Check on the status of the server builds. Completed or error/unknown
-# states are removed from the list until nothing remains.
-first_node = True
-while ids:
-    # Track the element position for easier/efficient removal
-    pos = 0
-    for id in ids:
-        # Get the server details for the ID in question
-        server = cs.servers.get(id)
-        # Should it meet the necessary criteria, provide extended info
-        # and remove from the list
-        if server.status in ["ACTIVE", "ERROR", "UNKNOWN"]:
-            print ("\n-- Server details --\n\tName: %s\n\tStatus: %s"
-                   % (server.name, server.status))
-            if server.status in ["ACTIVE"]:
-                print ("\tServer networks:\n\t\tPublic #1: %s\n\t\tPublic "
-                      "#2: %s\n\t\tPrivate: %s"
-                      % (server.networks["public"][0],
-                      server.networks["public"][1],
-                      server.networks["private"][0]))
-                # Determine if this is the first build completed, and if so,
-                # create the LB (requires at least one node in order to build)
-                if first_node:
-                    node = clb.Node(address=server.networks["private"][0],
-                                    port=args.service_port,
-                                    condition="ENABLED")
-                    vip = clb.VirtualIP(type=args.lb_vip_type)
-                    lb = clb.create(args.lb_name, port=args.service_port,
-                         protocol="HTTP", nodes=[node], virtual_ips=[vip],
-                         algorithm=args.algorithm)
-                    lb_id = lb.id
-                    first_node = False
+    # Prepare a list for all active servers, since failed entries will
+    # not be removed as we do not have health checks defined just yet
+    srv = []
+
+    # Check on the status of the server builds. Completed or error/unknown
+    # states are removed from the list until nothing remains.
+    while servers:
+        # Track the element position for easier/efficient removal
+        count = 0
+        for server in servers:
+            # Get the updated server details
+            server.get()
+            # Should it meet the necessary criteria, provide extended info
+            # and remove from the list
+            if server.status in ["ACTIVE", "ERROR", "UNKNOWN"]:
+                print ("\n-- Server details\n\tName: %s\n\tStatus: %s"
+                       "\n\tAdmin password: %s"
+                      % (server.name, server.status, server.adminPass))
+                print ("\tNetworks:\n\t\tPublic #1: %s\n\t\t"
+                       "Public #2: %s\n\t\tPrivate: %s"
+                       % (server.networks["public"][0],
+                          server.networks["public"][1],
+                          server.networks["private"][0]))
+                # Failed build, state so to the client/user
+                if server.status not in ["ACTIVE"]:
+                    ERRORS = True
+                    print "WARN: Something went wrong with the build request"
+                # Otherwise append to the active list to be added to the LB
                 else:
-                    # We need to ensure that the LB is not updating at the
-                    # moment - avoid a status conflict if more than one
-                    # node is ready to be added at any given time
-                    lb = clb.get(lb_id)
-                    while lb.status not in ["ACTIVE"]:
-                        sleep(5)
-                        lb = clb.get(lb_id)
-                    
-                    # Add the newly created node
-                    node = clb.Node(address=server.networks["private"][0],
-                                    port=args.service_port,
-                                    condition="ENABLED")
-                    lb.add_nodes(node)                  
-            else:
-                errors = True
-                print "WARNING: Something went wrong with the build request"
-                print "Please review the server state"
-            del ids[pos]
-        pos += 1
-    # Reasonable wait period between server/node build status checks
-    sleep(10)
-    # Generate some output to assure the user/client things are moving
-    sys.stdout.write(".")
-    sys.stdout.flush()
+                    srv.append(server)
+                del servers[count]
+            count += 1
+        # Reasonable wait period between checks
+        sleep(15)
 
-# All done, print the LB details and exit message
-print ("\n-- LB details --\n\tName: %s\n\tIP address: %s"
-       % (lb.name, lb.virtual_ips[0].address))
-exit_msg = "Build requests completed"
-if errors:
-    print "%s - with errors (see above for details)" % (exit_msg)
-else:
-    print "%s" % (exit_msg)
+    # Check if we have active servers, no point in proceeding if there
+    # are none since at least a single instance is required to create
+    # an LB
+    if len(srv) == 0:
+        print "ERROR: No servers in an active state, cannot create LB"
+        exit(4)
+    else:
+        # Otherwise, prepare and add all active nodes
+        nodes = []
+        for server in srv:
+            nodes.append(clb.Node(address=server.networks["private"][0],
+                                  port="80"))
+
+        # Define the VIP type based on argument provided by client/user
+        vip = clb.VirtualIP(type=args.lb_vip_type)
+        
+        # Create the LB
+        lb = clb.create(lbname, port=args.service_port, protocol="HTTP",
+                        nodes=nodes, virtual_ips=[vip])
+
+        # Print LB details
+        public_ips = [vip.address for vip in lb.virtual_ips]
+        print ("\n-- LB details --\n\tName: %s\n\tPort: %s\n\t"
+               "Algorithm type: %s\n\tNode count: %s"
+                % (lb.name, lb.port, lb.algorithm, len(lb.nodes)))
+        count = 1
+        for ip in public_ips:
+            print "\tIP address #%d: %s" % (count, ip)
+            count += 1
+    
+    # All done, complete with an overall status update
+    exit_msg = "\nBuild requests completed"
+    if ERRORS:
+        print "%s - with errors (see above for details)" % (exit_msg)
+    else:
+        print "%s" % (exit_msg)
+
+
+if __name__ == '__main__':
+    main()
