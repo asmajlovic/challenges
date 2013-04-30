@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import getpass
+import argparse
 import os
 import sys
 from time import sleep
@@ -22,108 +22,138 @@ from time import sleep
 import pyrax
 from pyrax import exceptions as e
 
+# Location of pyrax configuration file
+CONFIG_FILE = "~/.rackspace_cloud_credentials"
+
 # Max volume size (GB) definition
-#   NOTE: Not a great way to define it but there seems to be no straightforward
+#   NOTE: Not a great way to define it but there seems to be no easy
 #         way to determine the maximum volume size.  One approach is to
 #         attempt to build an instance with a ridiculously high value and
 #         parse the exception output/message for the current limit
-max_volume_size = 150
+MAX_VOL_SIZE = 150
 
-# Define the authentication credentials file location and request that pyrax
-# makes use of it. If not found, let the client/user know about it.
+# Available flavors
+#   NOTE: Can be handled better if we can grab the flavor list before the
+#         the arguments are parsed, this setting some choices dynamically.
+#         Since region is part of the argument list, we get into a bit of
+#         a pickle - region is an arg and needs to be parsed before we
+#         can authenticate and grab the flavor list :-/
+RAM_LIST = [ 512, 1024, 2048, 4096, 8192, 16384 ]
 
-# Use a credential file in the following format:
-# [rackspace_cloud]
-# username = myusername
-# api_key = 01234567890abcdef
-# region = ORD
 
-try:
-    creds_file = os.path.expanduser("~/.rackspace_cloud_credentials")
-    pyrax.set_credential_file(creds_file, "ORD")
-except e.AuthenticationFailed:
-    print ("ERROR: Authentication failed. Please check and confirm "
-           "that the API username, key, and region are in place and correct.")
-    sys.exit(1)
-except e.FileNotFound:
-    print "ERROR: Credentials file '%s' not found" % (creds_file)
-    sys.exit(2)
+def main():
+    """
+    Challenge 5
+    -- Write a script that creates a Cloud Database instance. This instance
+       should contain at least one database, and the database should have at
+       least one user that can connect to it.
+    """
+    # Parse script parameters
+    parser = argparse.ArgumentParser(description=("Create an Cloud DB "
+                                                  "instance along with a DB "
+                                                   "and management user"))
+    parser.add_argument("-i", "--instance", action="store",
+                        required=True, type=str, metavar="INSTANCE_NAME",
+                        help="Preferred Cloud DB instance name")
+    parser.add_argument("-m", "--ram", action="store", required=False,
+                        type=int, metavar="RAM_SIZE",
+                        help="Preferred RAM size of instance (default 512MB)",
+                        choices=RAM_LIST, default=512)
+    parser.add_argument("-v", "--volume", action="store", required=False,
+                        type=int, metavar="DB_VOLUME_SIZE",
+                        help=("Preferred DB volume size in GB (default "
+                              "1 GB)"), default=1)
+    parser.add_argument("-d", "--db", action="store",
+                        required=False, type=str, metavar="DB_NAME",
+                        help="Preferred DB name (default 'mydb'",
+                        default="mydb")
+    parser.add_argument("-u", "--username", action="store", required=False,
+                        type=str, metavar="DB_USER",
+                        help=("Preferred DB management user (default "
+                              "'dbuser'"), default="dbuser")
+    parser.add_argument("-p", "--password", action="store", required=False,
+                        type=str, metavar="DB_PASS",
+                        help=("Preferred DB user password (default random "
+                              "string"), default=(pyrax.utils.random_name(
+                                         length=10, ascii_only=True)))
+    parser.add_argument("-r", "--region", action="store", required=False,
+                            metavar="REGION", type=str,
+                            help=("Region where container should be created "
+                                  "(defaults to 'ORD'"),
+                                  choices=["ORD", "DFW", "LON"],
+                                  default="ORD")
 
-# Use a shorter Cloud Databases class reference string
-# This simplifies invocation later on (less typing)
-cdb = pyrax.cloud_databases
+    # Parse arguments (validate user input)
+    args = parser.parse_args()
 
-# Grab a list of all available flavours and enumerate, giving the selection
-# prompt to the client/user
-flavors = cdb.list_flavors()
-name = raw_input("Please enter a name for your new Cloud Database instance: ")
-print "Available flavors:"
-for pos, flavor in enumerate(flavors):
-    print "%2d) %s [%s RAM]" % (pos, flavor.name, flavor.ram)
+    # Determine if volume size is in acceptable range
+    if args.volume < 1 or args.volume > 150:
+        print ("ERROR: Permitted volume size is between 1 and %d GB"
+               % (MAX_VOL_SIZE))
+        sys.exit(1)
 
-# Keep requesting until a valid selection is made
-selection = None
-while not selection:
+    # Define the authentication credentials file location and request that
+    # pyrax makes use of it. If not found, let the client/user know about it.
+
+    # Use a credential file in the following format:
+    # [rackspace_cloud]
+    # username = myusername
+    # api_key = 01234567890abcdef
+    # region = LON
+
     try:
-        val = int(raw_input("Select a flavor for your new instance: "))
-        # User could potentially provide a negative integer, which will still
-        # be a valid index reference - including a crude catch here
-        if val < 0:
-            print "Invalid selection. Please try again."
-            selection = None
-        else:
-            selection = flavors[val]
-    except IndexError:
-        print "Invalid selection. Please try again."
-    except ValueError:
-        print "Selection must be an integer listed above, please try again."
+        creds_file = os.path.expanduser(CONFIG_FILE)
+        pyrax.set_credential_file(creds_file, args.region)
+    except e.AuthenticationFailed:
+        print ("ERROR: Authentication failed. Please check and confirm "
+               "that the API username, key, and region are in place and "
+               "correct.")
+        sys.exit(2)
+    except e.FileNotFound:
+        print "ERROR: Credentials file '%s' not found" % (creds_file)
+        sys.exit(3)
 
-# Repeat for the volume size
-size = None
-while not size:
-    try:
-        size = int(raw_input(("Please enter the volume size in GB (1-%d): ")
-              % max_volume_size))
-        if size < 1 or size > max_volume_size:
-            print "Volume size must be a positive integer in the listed range"
-            size = None
-    except ValueError:
-        print "Volume size must be a positive integer in the listed range"
+    # Use a shorter Cloud Databases class reference string
+    # This simplifies invocation later on (less typing)
+    cdb = pyrax.cloud_databases
 
-# Grab DB name from user/client
-dbname = raw_input("Please enter the DB name to be created on instance: ")
+    # Determine which flavor was selected and grab the full details
+    flavor = [i for i in cdb.list_flavors() if args.ram == i.ram][0]
 
-# Same again for the DB user
-dbuser = raw_input("Please enter the username to manage the DB: ")
+    # Attempt to create the instance
+    print "Creating instance '%s'" % (args.instance)
+    instance = cdb.create(args.instance, flavor=flavor, volume=args.volume)
 
-# We need a password as well (possibility of auto-generating as a feature)
-dbpass = getpass.getpass("Please enter the preferred password for the user: ")
+    # Keep checking status until it's something other than 'BUILD'
+    while instance.status in ["BUILD"]:
+        # Push something to the screen to assure us things are moving along
+        sys.stdout.write(".")
+        sys.stdout.flush()
+        # Reasonable wait time between status checks
+        sleep(15)
+        instance.get()
+    print
 
-# Attempt to create the instance
-print "Creating instance '%s'" % (name)
-instance = cdb.create(name, flavor=selection, volume=size)
-id = instance.id
+    # Inform the client/user of the outcome
+    if instance.status not in ["ACTIVE"]:
+        print ("Something went wrong with the instance build\nStatus: %s"
+               % instance.status)
+        sys.exit(4)
+    else:
+        print "Instance creation complete"
 
-# Keep checking status until it's something other than 'BUILD'
-while instance.status in ["BUILD"]:
-    sys.stdout.write(".")
-    sys.stdout.flush()
-    sleep(5)
-    instance = cdb.get(id)
-print
+    # Add the new DB to the instance
+    instance.create_database(args.db)
 
-# Inform the client/user of the outcome
-if instance.status not in ["ACTIVE"]:
-    print "Something went wrong with the build\nStatus: %s" % instance.status
-    sys.exit(3)
-else:
-    print "Instance creation complete"
+    # Same for the user
+    instance.create_user(args.username, args.password,
+                                database_names=args.db)
 
-# Add the new DB to the instance
-db = instance.create_database(dbname)
+    # We're done
+    print ("-- Details:\n\tDB Host: %s\n\tDB Name: %s\n\tDB User: %s\n\t"
+           "DB Password: %s" % (instance.hostname, args.db, args.username,
+            args.password))
 
-# Same for the user
-user = instance.create_user(dbuser, dbpass, database_names=db.name)
 
-# We're done
-print "Database created and user added. All done."
+if __name__ == '__main__':
+    main()
