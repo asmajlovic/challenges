@@ -23,7 +23,7 @@ import pyrax
 from pyrax import exceptions as e
 
 # Location of pyrax configuration file
-CONFIG_FILE = "~/.rackspace_cloud_credentials"
+CONFIGFILE = "~/.rackspace_cloud_credentials"
 
 def main():
     """
@@ -39,7 +39,7 @@ def main():
     # later on. The choices permitted will be made up of this list.
     #    NOTE: Should revisit to make more dynamic for if and when
     #          the list is updated
-    flavor_list = [512, 1024, 2048, 4096, 8192, 15360, 30720]
+    FLAVOR_LIST = [512, 1024, 2048, 4096, 8192, 15360, 30720]
     
     # Define the script parameters (all are optional for the time being)
     parser = argparse.ArgumentParser(description=("Cloud Server provisioning "
@@ -62,7 +62,7 @@ def main():
     parser.add_argument("-s", "--size", action="store", required=False,
                         metavar="SERVER_RAM_SIZE", type=int,
                         help=("Server RAM size in megabytes (defaults to "
-                              "'512')"), choices=flavor_list, default=512)
+                              "'512')"), choices=FLAVOR_LIST, default=512)
     parser.add_argument("-c", "--count", action="store", required=False,
                         metavar="SERVER_COUNT", type=int,
                         help="Number of servers to build (defaults to 3)",
@@ -81,7 +81,7 @@ def main():
     # region = LON
 
     try:
-        creds_file = os.path.expanduser(CONFIG_FILE)
+        creds_file = os.path.expanduser(CONFIGFILE)
         pyrax.set_credential_file(creds_file, args.region)
     except e.AuthenticationFailed:
         print ("ERROR: Authentication failed. Please check and confirm "
