@@ -23,105 +23,143 @@ from time import sleep
 import pyrax
 from pyrax import exceptions as e
 
-# Set upload progress toolbar width
-toolbar_width = 50
+# Set progress toolbar width (used with image and server creation progress)
+TOOLBAR_WIDTH = 50
 
-# Parse script parameters
-parser = argparse.ArgumentParser(description=("Push local directories/objects "
-                                               "to Cloud Files CDN"))
-parser.add_argument("-d", "--directory", action="store",
-                    required=True, type=str,
-                    help="Local directory to upload content from")
-parser.add_argument("-c", "--container", action="store",
-                    required=True, type=str,
-                    help="Container name where content should be uploaded")
-parser.add_argument("-t", "--ttl", action="store", required=False, type=int,
-                    help=("CDN TTL (in seconds) for the container "
-                          "(default 900 seconds)"), default=900)
+# Minimum TTL (in seconds) for a CDN enabled container
+MIN_TTL = 900
 
-args = parser.parse_args()
+# Location of pyrax configuration file
+CONFIG_FILE = "~/.rackspace_cloud_credentials"
 
-# Determine if the upload directory exists
-if not os.path.isdir(args.directory):
-    print ("ERROR: Specified directory (%s) does not exist, please check "
-           "the path and try again)" % (args.directory))
-    sys.exit(1)
+def main():
+    """
+    Challenge 6
+    -- Write a script that creates a CDN-enabled container in Cloud Files
+    """
+    # Parse script parameters
+    parser = argparse.ArgumentParser(description=("Push local objects "
+                                                   "to Cloud Files"))
+    parser.add_argument("-d", "--directory", action="store",
+                        required=True, type=str, metavar="LOCAL_DIR",
+                        help="Local directory to upload content from")
+    parser.add_argument("-c", "--container", action="store",
+                        required=True, type=str, metavar="CONTAINER_NAME",
+                        help=("Container name where content should "
+                              "be uploaded"))
+    parser.add_argument("-r", "--region", action="store", required=False,
+                            metavar="REGION", type=str,
+                            help=("Region where container should be created"
+                                  " (defaults to 'ORD'"),
+                                  choices=["ORD", "DFW", "LON"],
+                                  default="ORD")
+    parser.add_argument("-t", "--ttl", action="store", required=False,
+                        type=int, help=(("CDN TTL (in seconds) for the "
+                              "container (default %d seconds)") % (MIN_TTL)),
+                               default=MIN_TTL)
+    parser.add_argument("-f", "--force", action="store_true",
+                        required=False, help=("Permit upload to an "
+                        "existing container"))
 
-# Define the authentication credentials file location and request that pyrax
-# makes use of it. If not found, let the client/user know about it.
+    args = parser.parse_args()
 
-# Use a credential file in the following format:
-# [rackspace_cloud]
-# username = myusername
-# api_key = 01234567890abcdef
-# region = ORD
-
-try:
-    creds_file = os.path.expanduser("~/.rackspace_cloud_credentials")
-    pyrax.set_credential_file(creds_file, "ORD")
-except e.AuthenticationFailed:
-    print ("ERROR: Authentication failed. Please check and confirm "
-           "that the API username, key, and region are in place and correct.")
-    sys.exit(1)
-except e.FileNotFound:
-    print "ERROR: Credentials file '%s' not found" % (creds_file)
-    sys.exit(1)
-
-# Use a shorter Cloud Files class reference string
-# This simplifies invocation later on (less typing)
-cf = pyrax.cloudfiles
-
-# Determine if container already exists, otherwise create it
-try:
-    print "Checking if container exists..."
-    cont = cf.get_container(args.container)
-except:
-    cont = None
-
-# Container not found, create it and CDN enable
-if cont is None:
-    try:
-        print ("Container '%s' does not exist, creating"
-               % (args.container))
-        cont = cf.create_container(args.container)
-        print "Setting CDN TTL to %s seconds" % (args.ttl)
-        cont.make_public(ttl=args.ttl)
-    except:
-        print "ERROR: Could not create container", args.container
+    # Determine if the upload directory exists
+    if not os.path.isdir(args.directory):
+        print ("ERROR: Specified directory (%s) does not exist, please check "
+               "the path and try again)" % (args.directory))
         sys.exit(1)
-# Otherwise print the current CDN TTL associated with the existing container
-else:
-    print ("Container '%s' already exists - continuing with upload" %
-           (cont.name))
 
-# Start the upload
-print "Beginning directory/folder upload"
-(upload_key, total_bytes) = cf.upload_folder(args.directory, cont)
+    # Determine if TTL is at least the minimum value permitted
+    if args.ttl < MIN_TTL:
+        print "ERROR: Minimum TTL permitted is %ds" % (MIN_TTL)
+        sys.exit(2)
 
-# Inform the user of the total upload size
-print ("Total upload size: %d bytes (%.2f MB)"
-       % (total_bytes, total_bytes / 1024.0 / 1024))
+    # Define the authentication credentials file location and request that
+    # pyrax makes use of it. If not found, let the client/user know about it.
 
-# Prepare progress toolbar
-sys.stdout.write("[%s]" % (" " * toolbar_width))
-sys.stdout.flush()
-sys.stdout.write("\b" * (toolbar_width+1)) # return to start of line, after '['
+    # Use a credential file in the following format:
+    # [rackspace_cloud]
+    # username = myusername
+    # api_key = 01234567890abcdef
+    # region = LON
 
-# Print the upload progress (1 second interval)
-uploaded = 0
-while uploaded < total_bytes:
-    uploaded = cf.get_uploaded(upload_key)
-    progress = int(ceil((uploaded * 100.0) / total_bytes / 2))
-    sys.stdout.write("%s" % ("=" * progress))
+    try:
+        creds_file = os.path.expanduser(CONFIG_FILE)
+        pyrax.set_credential_file(creds_file, args.region)
+    except e.AuthenticationFailed:
+        print ("ERROR: Authentication failed. Please check and confirm "
+               "that the API username, key, and region are in place "
+               "and correct.")
+        sys.exit(3)
+    except e.FileNotFound:
+        print "ERROR: Credentials file '%s' not found" % (creds_file)
+        sys.exit(4)
+
+    # Use a shorter Cloud Files class reference string
+    # This simplifies invocation later on (less typing)
+    cf = pyrax.cloudfiles
+
+    # Determine if container already exists, otherwise create it
+    try:
+        print "Checking if container already exists..."
+        cont = cf.get_container(args.container)
+    except:
+        cont = None
+
+    # Container not found, create it and CDN enable
+    if cont is None:
+        try:
+            print ("Container '%s' not found, creating with TTL set to %d..."
+                   % (args.container, args.ttl))
+            cont = cf.create_container(args.container)
+            cont.make_public(ttl=args.ttl)
+        except:
+            print "ERROR: Could not create container", args.container
+            sys.exit(5)
+    # Otherwise inform the user/client that the directory exists and
+    # determine if we can proceed (is the overwrite flag set)
+    else:
+        print ("Container '%s' found with TTL set to %d"
+               % (cont.name, cont.cdn_ttl))
+        if args.force:
+            print "Proceeding as upload has been forced"
+        else:
+            print "Force flag not set, exiting..."
+            sys.exit(6)
+
+    # Start the upload
+    print "Beginning directory/folder upload"
+    (upload_key, total_bytes) = cf.upload_folder(args.directory, cont)
+
+    # Inform the user of the total upload size
+    print ("Total upload size: %d bytes (%.2f MB)"
+           % (total_bytes, total_bytes / 1024.0 / 1024))
+
+    # Prepare progress toolbar
+    sys.stdout.write("[%s]" % (" " * TOOLBAR_WIDTH))
     sys.stdout.flush()
-    sys.stdout.write("\b" * (progress)) # Reset progress bar
-    sleep(1)
-print
+    # Return to start of line, after '['
+    sys.stdout.write("\b" * (TOOLBAR_WIDTH + 1))
 
-# Upload completed, confirm/print object count
-nms = cf.get_container_object_names(cont)
-print "Number of objects uploaded: %d" % (len(nms))
-print ("CDN links\nHTTP: %s\nHTTPS: %s\nStreaming: %s\niOS streaming: %s"
-       % (cont.cdn_uri, cont.cdn_ssl_uri, cont.cdn_streaming_uri,
-          cont.cdn_ios_uri))
-print "Upload complete"
+    # Print the upload progress (1 second interval)
+    uploaded = 0
+    while uploaded < total_bytes:
+        uploaded = cf.get_uploaded(upload_key)
+        progress = int(ceil((uploaded * 100.0) / total_bytes / 2))
+        sys.stdout.write("%s" % ("=" * progress))
+        sys.stdout.flush()
+        sys.stdout.write("\b" * (progress)) # Reset progress bar
+        sleep(1)
+    print
+
+    # Upload completed, print object count and CDN URIs
+    objs = cf.get_container_object_names(cont)
+    print "Number of objects uploaded: %d" % (len(objs))
+    print ("CDN links\nHTTP: %s\nHTTPS: %s\nStreaming: %s\niOS streaming: %s"
+           % (cont.cdn_uri, cont.cdn_ssl_uri, cont.cdn_streaming_uri,
+              cont.cdn_ios_uri))
+    print "Upload complete"
+
+
+if __name__ == '__main__':
+    main()
