@@ -14,16 +14,47 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import argparse
 import os
 import socket
-import sys
+from sys import exit
 from time import sleep
 
 import pyrax
 from pyrax import exceptions as e
 
-# Determine whether or not the IPv4 address provided is correctly structured
+# Location of pyrax configuration file
+CONFIG_FILE = "~/.rackspace_cloud_credentials"
+
+# Default TTL value
+DEFAULT_TTL = 300
+
+def zone_list(obj):
+    """
+    Return all zones under an account
+    """
+    # Get and return the zone list
+    doms = obj.list()
+    return doms
+
+
+def is_int(val, limit):
+    """
+    Determine if value provided is an integer greater than or equal to limit
+    """
+    try:
+        val = int(val)
+        if val < limit:
+            val = None
+    except ValueError:
+        val = None
+    return val
+
+
 def is_valid_ipv4(address):
+    """
+    Determine whether or not the IPv4 address provided is correctly structured
+    """
     try:
         addr = socket.inet_pton(socket.AF_INET, address)
     except AttributeError:
@@ -34,126 +65,189 @@ def is_valid_ipv4(address):
         return address.count('.') == 3
     except socket.error:
         return False
-
     return True
 
-# Define the authentication credentials file location and request that pyrax
-# makes use of it. If not found, let the client/user know about it.
 
-# Use a credential file in the following format:
-# [rackspace_cloud]
-# username = myusername
-# api_key = 01234567890abcdef
-# region = ORD
+def main():
+    """
+    Challenge 9
+    -- Write an application that when passed the arguments FQDN, image, and
+       flavor it creates a server of the specified image and flavor with the
+       same name as the FQDN, and creates a DNS entry for the FQDN pointing
+       to the server's public IP.
+    """
+    # Variable to determine if build errors were encountered
+    ERRORS = False
 
-try:
-    creds_file = os.path.expanduser("~/.rackspace_cloud_credentials")
-    pyrax.set_credential_file(creds_file, "ORD")
-except e.AuthenticationFailed:
-    print ("ERROR: Authentication failed. Please check and confirm "
-           "that the API username, key, and region are in place and correct.")
-    sys.exit(1)
-except e.FileNotFound:
-    print "ERROR: Credentials file '%s' not found" % (creds_file)
-    sys.exit(2)
+    # Compile a list of available RAM sizes for use in argument parsing
+    # later on. The choices permitted will be made up of this list.
+    #    NOTE: Should revisit to make more dynamic for if and when
+    #          the list is updated
+    FLAVOR_LIST = [512, 1024, 2048, 4096, 8192, 15360, 30720]
 
-# Use a shorter Cloud Servers and DNS class reference strings
-# This simplifies invocation later on (less typing)
-cs = pyrax.cloudservers
-dns = pyrax.cloud_dns
+    # Parse script parameters
+    parser = argparse.ArgumentParser(description=("Create a server using "
+                                                  "FQDN and IP address "
+                                                   "parameters"))
+    parser.add_argument("-f", "--fqdn", action="store",
+                        required=True, type=str, metavar="FQDN",
+                        help="Fully qualified domain name for A record")
+    parser.add_argument("-i", "--image", action="store", required=False,
+                        metavar="SERVER_IMAGE", type=str,
+                        help=("Image ID to be used in server build (defaults"
+                              " to '8ae428cd-0490-4f3a-818f-28213a7286b0' - "
+                              "Debian Squeeze"),
+                              default="8ae428cd-0490-4f3a-818f-28213a7286b0")
+    parser.add_argument("-s", "--size", action="store", required=False,
+                        metavar="SERVER_RAM_SIZE", type=int,
+                        help=("Server RAM size in megabytes (defaults to "
+                              "'512')"), choices=FLAVOR_LIST, default=512)
+    parser.add_argument("-r", "--region", action="store", required=False,
+                            metavar="REGION", type=str,
+                            help=("Region where container should be created "
+                                  "(defaults to 'ORD'"),
+                                  choices=["ORD", "DFW", "LON"],
+                                  default="ORD")
+    parser.add_argument("-t", "--ttl", action="store",
+                        required=False, type=int, metavar="TTL_VALUE",
+                        help=("TTL for the new record (default %ds)"
+                             % (DEFAULT_TTL)), default=DEFAULT_TTL)
 
-# Intro/description
-print ("-- Server build from image and flavor - creating a FQDN DNS record "
-       "in the process")
+    # Parse arguments (validate user input)
+    args = parser.parse_args()
 
-# Grab a list of available images and flavors
-images = cs.list_images()
-flavors = cs.list_flavors()
+    # Determine if the FQDN is correctly formated (at least three segments
+    # separated by '.' are required).
+    #    NOTE: This can be improved since we're not checking whether or not
+    #          the zone in question is a valid TLD or if the string only has
+    #          valid (alphanumeric) characters
+    segments = args.fqdn.split('.')
+    if len(segments) < 3:
+        print ("ERROR: FQDN string is incorrectly formatted, please check "
+               "and try again")
+        print ("Base zone/domain in the format 'example.com' will not be "
+               "accepted")
+        exit(2)
+    # All is apparently well, define the zone/domain using the FQDN string
+    else:
+        zone_name = '.'.join(segments[-(len(segments)-1):])
+    
+    # If TTL has been provided, confirm that it is valid
+    if args.ttl:
+        ttl = is_int(args.ttl, DEFAULT_TTL)
+        if not ttl:
+            print ("ERROR: TTL must be an integer greater or equal to %d"
+                   % (DEFAULT_TTL))
+            exit(3)
+    else:
+        ttl = DEFAULT_TTL
 
-# Compile the list of images and flavors for simple selection
-srv_img_dict = {}
-srv_flav_dict = {}
+    # Define the authentication credentials file location and request that
+    # pyrax makes use of it. If not found, let the client/user know about it.
 
-# Ask the user to pick the image to use
-for pos, img in enumerate(images):
-    print "%2d) %s" % (pos, img.name)
-    srv_img_dict[str(pos)] = img.id
+    # Use a credential file in the following format:
+    # [rackspace_cloud]
+    # username = myusername
+    # api_key = 01234567890abcdef
+    # region = LON
 
-img_sel = None
-while img_sel not in srv_img_dict:
-    if img_sel is not None:
-        print "   -- Invalid choice"
-    img_sel = raw_input("-- Select the image to use: ")
+    try:
+        creds_file = os.path.expanduser(CONFIG_FILE)
+        pyrax.set_credential_file(creds_file, args.region)
+    except e.AuthenticationFailed:
+        print ("ERROR: Authentication failed. Please check and confirm "
+               "that the API username, key, and region are in place and correct.")
+        exit(4)
+    except e.FileNotFound:
+        print "ERROR: Credentials file '%s' not found" % (creds_file)
+        exit(5)
 
-# Ask the user to pick the flavor to use
-for pos, flav in enumerate(flavors):
-    print "%2d) %s [%s GB disk]" % (pos, flav.name, flav.disk)
-    srv_flav_dict[str(pos)] = flav.id
+    # Use a shorter Cloud Servers and DNS class reference strings
+    # This simplifies invocation later on (less typing)
+    cs = pyrax.cloudservers
+    dns = pyrax.cloud_dns
 
-flav_sel = None
-while flav_sel not in srv_flav_dict:
-    if flav_sel is not None:
-        print "   -- Invalid choice"
-    flav_sel = raw_input("-- Select the flavor to use: ")
+    # Grab zone list
+    domains = zone_list(dns)
 
-# Map to image and flavor IDs
-img_id = srv_img_dict[img_sel]
-flav_id = srv_flav_dict[flav_sel]
+    # No zones found, inform that one needs to be created and exit
+    if len(domains) == 0:
+        print "ERROR: You have no domains/zones at this time"
+        print "Please create one first then try again"
+        exit(6)
 
-# Grab the server name
-sname = raw_input("Please enter the FQDN for server name and DNS A record: ")
+    # Attempt to locate the zone extracted from FQDN string
+    try:
+        zone = [d for d in domains if zone_name in d.name][0]
+    except:
+        print "ERROR: Zone '%s' not found" % (zone_name)
+        print "Please check/create and try again"
+        exit(7)
 
-# Attempt to build the server and track progress
-print "Building server..."
-srv = cs.servers.create(sname, img_id, flav_id)
+    # Locate the image to build from (confirm it exists)
+    try:
+        image = [i for i in cs.images.list() if args.image in i.id][0]
+    except:
+        print ("ERROR: Image ID provided was not found. Please check "
+               "and try again")
+        exit(8)
 
-while srv.status in ["BUILD"]:
-    sys.stdout.write(".")
-    sys.stdout.flush()
-    sleep(5)
-    srv = cs.servers.get(srv.id)
-print
+    # Grab the flavor ID from the RAM amount selected by the user.
+    # The server create request requires the ID rather than RAM amount.
+    flavor = [f for f in cs.flavors.list() if args.size == f.ram][0]
 
-# Server build has issues, show the status
-if srv.status not in ["ACTIVE"]:
-    print ("Something went wrong during the server creation\nPlease review the"
-           "output below:\n\tID: %s\n\tName: %s\n\tStatus: %s\n" %
-           (srv.id, srv.name, srv.status))
-# All is well with the server build
-else:
-    print ("Server networks:\n\tPublic #1: %s\n\tPublic "
-           "#2: %s\n\tPrivate: %s\n"
-           % (srv.networks["public"][0],
-              srv.networks["public"][1],
-              srv.networks["private"][0]))
+    # Print the image ID and name selected along with chosen RAM size
+    print "-- Image details\n\tID: %s\n\tName: %s" % (image.id, image.name)
+    print ("\n-- Server build details\n\tName: %s\n\tSize: %d MB"
+           % (args.fqdn, args.size))
 
-# Public IP address order is not standard, need to grab the IPv4 entry
-#    NOTE: This can be approached better, will need to review later
-count = 0
-ip = srv.networks["public"][count]
+    # Attempt to build the server and track progress
+    print "\nBuilding server..."
+    srv = cs.servers.create(args.fqdn, image.id, flavor.id)
 
-while not is_valid_ipv4(ip):
-    count += 1
+    while srv.status in ["BUILD"]:
+        sleep(15)
+        srv.get()
+
+    # Server build has issues, show the status
+    if srv.status not in ["ACTIVE"]:
+        print ("Something went wrong during the server creation\nPlease "
+               "review the output below:\n\tID: %s\n\tName: %s\n\tStatus: "
+               "%s\n" % (srv.id, srv.name, srv.status))
+    # All is well with the server build
+    else:
+        print ("\n-- Server details\n\tName: %s\n\tStatus: %s"
+               "\n\tAdmin password: %s"
+               % (srv.name, srv.status, srv.adminPass))
+        print ("\tNetworks:\n\t\tPublic #1: %s\n\t\t"
+               "Public #2: %s\n\t\tPrivate: %s"
+               % (srv.networks["public"][0], srv.networks["public"][1],
+                  srv.networks["private"][0]))
+
+    # Public IP address order is not standard, need to grab the IPv4 entry
+    #    NOTE: This can be approached better, will need to review later
+    count = 0
     ip = srv.networks["public"][count]
 
-# Attempt to create the zone from the FQDN provided
-try:
-    zone = dns.create(name=sname, emailAddress="pyrax@example.com",
-            ttl=300, comment="Sample domain")
-except e.DomainCreationFailed as err:
-    print "Domain creation failed:", err
+    while not is_valid_ipv4(ip):
+        count += 1
+        ip = srv.networks["public"][count]
 
-# Define and attempt to add the new A record
-a_rec = {"type": "A",
-        "name": sname,
-        "data": ip,
-        "ttl": 300}
+    # Define and attempt to add the new A record
+    a_rec = {"type": "A",
+            "name": args.fqdn,
+            "data": ip,
+            "ttl": ttl}
 
-# Attempt to add the A record and we're done
-try:
-    rec = zone.add_record(a_rec)
-    print ("-- Record details\n\tName: %s\n\tType: %s\n\tIP address: %s\n\t"
-           "TTL: %s") % (rec[0].name, rec[0].type, rec[0].data, rec[0].ttl)
-    print "Process complete"
-except e.DomainRecordAdditionFailed as err:
-    print "Record creation failed:", err
+    # Attempt to add the A record and we're done
+    try:
+        rec = zone.add_record(a_rec)
+        print ("\n-- Record details\n\tName: %s\n\tType: %s\n\tIP address: "
+               "%s\n\tTTL: %s") % (rec[0].name, rec[0].type,
+                                    rec[0].data, rec[0].ttl)
+    except e.DomainRecordAdditionFailed as err:
+        print "Record creation failed:", err
+
+
+if __name__ == '__main__':
+    main()
