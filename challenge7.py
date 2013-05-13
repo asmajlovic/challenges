@@ -213,7 +213,7 @@ def main():
         
         # Create the LB
         lb = clb.create(lbname, port=args.service_port, protocol="HTTP",
-                        nodes=nodes, virtual_ips=[vip])
+                        nodes=nodes, virtual_ips=[vip], algorithm=args.algorithm)
 
         # Print LB details
         public_ips = [vip.address for vip in lb.virtual_ips]
