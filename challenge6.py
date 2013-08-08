@@ -32,6 +32,9 @@ MIN_TTL = 900
 # Location of pyrax configuration file
 CONFIG_FILE = "~/.rackspace_cloud_credentials"
 
+# Identity type to be used (RAX)
+IDENTITY_TYPE = "rackspace"
+
 def main():
     """
     Challenge 6
@@ -85,6 +88,7 @@ def main():
 
     try:
         creds_file = os.path.expanduser(CONFIG_FILE)
+        pyrax.set_setting("identity_type", IDENTITY_TYPE)
         pyrax.set_credential_file(creds_file, args.region)
     except e.AuthenticationFailed:
         print ("ERROR: Authentication failed. Please check and confirm "

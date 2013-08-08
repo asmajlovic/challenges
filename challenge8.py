@@ -35,6 +35,9 @@ MIN_TTL = 900
 # Default TTL (in seconds) for a Cloud DNS record
 DEFAULT_TTL = 300
 
+# Identity type to be used (RAX)
+IDENTITY_TYPE = "rackspace"
+
 def zone_list(obj):
     """
     Return all zones under an account
@@ -137,6 +140,7 @@ def main():
 
     try:
         creds_file = os.path.expanduser(CONFIG_FILE)
+        pyrax.set_setting("identity_type", IDENTITY_TYPE)
         pyrax.set_credential_file(creds_file, args.region)
     except e.AuthenticationFailed:
         print ("ERROR: Authentication failed. Please check and confirm "
