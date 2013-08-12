@@ -61,9 +61,9 @@ def main():
     parser.add_argument("-i", "--image", action="store", required=False,
                         metavar="SERVER_IMAGE", type=str,
                         help=("Image ID to be used in server build (defaults"
-                              " to '8ae428cd-0490-4f3a-818f-28213a7286b0' - "
+                              " to '92a28e50-181d-4fc7-a071-567d26fc95f6' - "
                               "Debian Squeeze"),
-                              default="8ae428cd-0490-4f3a-818f-28213a7286b0")
+                              default="92a28e50-181d-4fc7-a071-567d26fc95f6")
     parser.add_argument("-c", "--count", action="store", required=False,
                         metavar="SERVER_COUNT", type=int,
                         help="Number of servers to build (defaults to 2)",
