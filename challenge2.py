@@ -40,23 +40,23 @@ def main():
        image as a new server)
     """
 
-    parser = argparse.ArgumentParser(description=("Cloud Server cloning "
+    p = argparse.ArgumentParser(description=("Cloud Server cloning "
                                                   "application"))
-    parser.add_argument("-s", "--server", action="store", required=True,
-                        metavar="SERVER_ID", type=str,
-                        help=("ID of server to be cloned"))
-    parser.add_argument("-n", "--name", action="store", required=False,
-                        metavar="CLONE_NAME", type=str,
-                        help=("Name of cloned server (default appends "
-                              "'-copy' to original server name"))
-    parser.add_argument("-r", "--region", action="store", required=False,
-                        metavar="REGION", type=str,
-                        help=("Region where servers should be built (defaults"
-                              " to 'ORD'"), choices=["ORD", "DFW", "LON"],
-                              default="ORD")
+    p.add_argument("source", action="store", metavar="[server ID]", type=str,
+                   help=("ID of server to be cloned"))
+    p.add_argument("-n", "--name", action="store", required=False,
+                   metavar="[clone name]", type=str,
+                   help=("Name of cloned server (default appends "
+                         "'-copy' to original server name"))
+    p.add_argument("-r", "--region", action="store", required=False,
+                   metavar="[region]", type=str,
+                   help=("Region where servers should be built (defaults"
+                         " to 'ORD'"),
+                   choices=["ORD", "DFW", "LON", "IAD", "HKG", "SYD"],
+                   default="ORD")
 
     # Parse arguments (validate user input)
-    args = parser.parse_args()
+    args = p.parse_args()
     
     # Define the authentication credentials file location and request that
     # pyrax makes use of it. If not found, let the client/user know about it.
@@ -86,21 +86,19 @@ def main():
 
     # Attempt to locate the server using the ID provided
     try:
-        src_srv = cs.servers.get(args.server)
+        source = cs.servers.get(args.source)
     except:
         print ("ERROR: Could not find server with ID '%s'\nPlease check "
                "and try again" % (args.server))
         sys.exit(3)    
 
-    if args.name:
-        dst_srv_name = args.name
-    else:
-        dst_srv_name = src_srv.name = "-copy"
-
+    # Set the clone name if provided, or append default string to source name
+    dest_name = args.name if args.name else source.name + "-copy"
+    
     # Attempt to kick off the image build, freak out if it's already in
     # progress
     try:
-        img_id = cs.servers.create_image(src_srv.id, dst_srv_name)
+        img_id = cs.servers.create_image(source.id, dest_name)
         print "Server image creation in progress..."
     except novaclient.exceptions.ClientException as err:
         print "ERROR: Image creation request failed\n%s" % (err)
@@ -112,7 +110,7 @@ def main():
     while img.status in ["SAVING"]:
         sys.stdout.write(".")
         sys.stdout.flush()
-        sleep(15)
+        sleep(30)
         img = cs.images.get(img_id)
     print
 
@@ -126,7 +124,7 @@ def main():
 
     # All is well with the new image, create a new server using it
     # as a template
-    srv = cs.servers.create(dst_srv_name, img.id, src_srv.flavor["id"])
+    srv = cs.servers.create(dest_name, img.id, source.flavor["id"])
 
     while srv.status in ["BUILD"]:
         sys.stdout.write(".")
@@ -150,8 +148,12 @@ def main():
                           srv.networks["public"][1],
                           srv.networks["private"][0]))
                           
-    # Clean up the image and we're done
-    cs.images.delete(img_id)
+    # Remove the clone image and we're done
+    try:
+        cs.images.delete(img_id)
+    except:
+        print ("WARNING: Clone image delete request failed\n"
+               "Please review and delete manually")
 
 
 if __name__ == '__main__':
