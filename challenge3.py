@@ -42,27 +42,27 @@ def main():
        etc.)
     """
     # Parse script parameters
-    parser = argparse.ArgumentParser(description=("Push local objects "
+    p = argparse.ArgumentParser(description=("Push local objects "
                                                    "to Cloud Files"))
-    parser.add_argument("-d", "--directory", action="store",
-                        required=True, type=str, metavar="LOCAL_DIR",
-                        help="Local directory to upload content from")
-    parser.add_argument("-c", "--container", action="store",
-                        required=True, type=str, metavar="CONTAINER_NAME",
-                        help=("Container name where content should "
+    p.add_argument("directory", action="store", type=str,
+                   metavar="[local dir]",
+                   help="Local directory to upload content from")
+    p.add_argument("container", action="store", type=str,
+                   metavar="[container name]",
+                   help=("Container name where content should "
                               "be uploaded"))
-    parser.add_argument("-r", "--region", action="store", required=False,
-                            metavar="REGION", type=str,
-                            help=("Region where container should be created"
-                                  " (defaults to 'ORD'"),
-                                  choices=["ORD", "DFW", "LON"],
-                                  default="ORD")
-    parser.add_argument("-f", "--force", action="store_true",
-                        required=False, help=("Permit upload to an "
-                        "existing container"))
+    p.add_argument("-r", "--region", action="store", required=False,
+                   metavar="[region]", type=str,
+                   help=("Region where container should be created"
+                         " (defaults to 'ORD'"),
+                   choices=["ORD", "DFW", "LON", "IAD", "HKG", "SYD"],
+                   default="ORD")
+    p.add_argument("-f", "--force", action="store_true",
+                   required=False, help=("Permit/force the upload to an "
+                   "existing container"))
 
     # Parse arguments (validate user input)
-    args = parser.parse_args()
+    args = p.parse_args()
 
     # Determine if the upload directory exists
     if not os.path.isdir(args.directory):
