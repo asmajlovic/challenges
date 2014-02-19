@@ -38,36 +38,54 @@ def main():
     # Variable to determine if build errors were encountered
     ERRORS = False
 
-    # Compile a list of available RAM sizes for use in argument parsing
+    # Compile a list of available flavours for use in argument parsing
     # later on. The choices permitted will be made up of this list.
-    #    NOTE: Should revisit to make more dynamic for if and when
-    #          the list is updated
-    FLAVOR_LIST = [512, 1024, 2048, 4096, 8192, 15360, 30720]
+    #    NOTE: Should revisit to make more dynamic and account for any
+    #          flavour updates
+    FLAVOUR_LIST = [
+                    "512MB Standard", 
+                    "1GB Standard",
+                    "2GB Standard",
+                    "4GB Standard",
+                    "8GB Standard",
+                    "15GB Standard",
+                    "30GB Standard",
+                    "1 GB Performance",
+                    "2 GB Performance",
+                    "4 GB Performance",
+                    "8 GB Performance",
+                    "15 GB Performance",
+                    "30 GB Performance",
+                    "60 GB Performance",
+                    "90 GB Performance",
+                    "120 GB Performance"
+                    ]
     
     # Define the script parameters (all are optional for the time being)
     parser = argparse.ArgumentParser(description=("Cloud Server provisioning "
                                                   "application"))
     parser.add_argument("-p", "--prefix", action="store", required=False,
-                        metavar="SERVER_NAME_PREFIX", type=str,
-                        help=("Server name prefix (defaults to 'server' e.g. "
-                              "server1, server2, ...)"), default="server")
+                        metavar="[name prefix]", type=str,
+                        help=("Server name prefix (defaults to 'server-' e.g."
+                              " server-1, server-2, ...)"), default="server-")
     parser.add_argument("-r", "--region", action="store", required=False,
-                        metavar="REGION", type=str,
+                        metavar="[region]", type=str,
                         help=("Region where servers should be built (defaults"
-                              " to 'ORD'"), choices=["ORD", "DFW", "LON"],
+                              " to 'ORD'"),
+                        choices=["ORD", "DFW", "LON", "IAD", "HKG", "SYD"],
                               default="ORD")
     parser.add_argument("-i", "--image", action="store", required=False,
-                        metavar="SERVER_IMAGE", type=str,
-                        help=("Image ID to be used in server build (defaults"
-                              " to '92a28e50-181d-4fc7-a071-567d26fc95f6' - "
-                              "Debian Squeeze"),
-                              default="92a28e50-181d-4fc7-a071-567d26fc95f6")
-    parser.add_argument("-s", "--size", action="store", required=False,
-                        metavar="SERVER_RAM_SIZE", type=int,
-                        help=("Server RAM size in megabytes (defaults to "
-                              "'512')"), choices=FLAVOR_LIST, default=512)
+                        metavar="[image name]", type=str,
+                        help=("Image name to be used in server build (defaults"
+                              " (defaults to 'Debian 7'"),
+                              default="Debian 7 (Wheezy)")
+    parser.add_argument("-f", "--flavour", action="store", required=False,
+                        metavar="[flavour name]", type=str,
+                        help=("Server flavour name (defaults to '1 GB "
+                              "Performance')"), choices=FLAVOUR_LIST,
+                              default="1 GB Performance")
     parser.add_argument("-c", "--count", action="store", required=False,
-                        metavar="SERVER_COUNT", type=int,
+                        metavar="[count]", type=int,
                         help="Number of servers to build (defaults to 3)",
                         choices=range(1,11), default=3)
 
@@ -77,7 +95,7 @@ def main():
     # Define the authentication credentials file location and request that
     # pyrax makes use of it. If not found, let the client/user know about it.
 
-    # Use a credential file in the following format:
+    # Use a credentials file in the following format:
     # [rackspace_cloud]
     # username = myusername
     # api_key = 01234567890abcdef
@@ -102,43 +120,46 @@ def main():
 
     # Locate the image to build from (confirm it exists)
     try:
-        image = [i for i in cs.images.list() if args.image in i.id][0]
+        image = [i for i in cs.images.list() if args.image in i.name][0]
     except:
-        print ("ERROR: Image ID provided was not found. Please check "
-               "and try again")
+        print ("ERROR: Image name provided has not matched any entries. "
+               "Please check and try again.")
         exit(3)
 
     # Grab the flavor ID from the RAM amount selected by the user.
     # The server create request requires the ID rather than RAM amount.
-    flavor = [f for f in cs.flavors.list() if args.size == f.ram][0]
+    try:
+        flavour = [f for f in cs.flavors.list() if args.flavour == f.name][0]
+    except:
+        print ("ERROR: Flavor name provided has not matched any entries. "
+               "Please check and try again.")
+        exit(4)
 
     print ("Cloud Server build request initiated\n"
            "TIP: You may wish to check available options by issuing "
            "the -h/--help flag\n")
 
-    # Print the image ID and name selected, as well as server count
+    # Print the image ID and name selected, as well as the server count
     print "-- Image details\n\tID: %s\n\tName: %s" % (image.id, image.name)
-    print ("\n-- Server build details\n\tSize: %d MB\n\tCount: %d"
-           % (args.size, args.count))
+    print ("\n-- Server build details\n\tFlavour: %s\n\tCount: %d"
+           % (flavour.name, args.count))
 
     # Server list definition to be used in tracking build status/comletion
     servers = []
 
     # Iterate through the server count specified, sending the build request
     # for each one in turn (concurrent builds)
-    count = 1
-    while count <= args.count:
+    for count in xrange(args.count):
         # Issue the server creation request
-        srv = cs.servers.create(args.prefix + str(count),
-                                   image.id, flavor.id)
+        srv = cs.servers.create(args.prefix + str(count + 1),
+                                   image.id, flavour.id)
         # Add server ID from the create request to the tracking list
         servers.append(srv)
-        count += 1
 
     # Check on the status of the server builds. Completed or error/unknown
     # states are removed from the list until nothing remains.
     while servers:
-        # Track the element position for easier/efficient removal
+        # Track the element position for 'more efficient' removal
         count = 0
         for server in servers:
             # Get the updated server details
@@ -163,7 +184,7 @@ def main():
         sleep(15)
 
     # All done
-    exit_msg = "\nBuild requests completed"
+    exit_msg = "\nBuild requests completed successfully"
     if ERRORS:
         print "%s - with errors (see above for details)" % (exit_msg)
     else:
