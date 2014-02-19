@@ -78,28 +78,25 @@ def main():
        passed a FQDN and IP address as arguments.
     """
     # Parse script parameters
-    parser = argparse.ArgumentParser(description=("Create an A record using "
-                                                  "FQDN and IP address "
-                                                   "parameters"))
-    parser.add_argument("-f", "--fqdn", action="store",
-                        required=True, type=str, metavar="FQDN",
-                        help="Fully qualified domain name for A record")
-    parser.add_argument("-i", "--ip", action="store",
-                        required=True, type=str, metavar="IP_ADDRESS",
-                        help="IP address to which A record will resolve to")
-    parser.add_argument("-r", "--region", action="store", required=False,
-                            metavar="REGION", type=str,
-                            help=("Region where container should be created "
-                                  "(defaults to 'ORD'"),
-                                  choices=["ORD", "DFW", "LON"],
-                                  default="ORD")
-    parser.add_argument("-t", "--ttl", action="store",
-                        required=False, type=int, metavar="TTL_VALUE",
-                        help=("TTL for the new record (default %ds)"
-                             % (DEFAULT_TTL)), default=DEFAULT_TTL)
+    p = argparse.ArgumentParser(description=("Create an A record using FQDN "
+                                             "and IP address parameters"))
+    p.add_argument("fqdn", action="store", type=str, metavar="[fqdn]",
+                   help="Fully qualified domain name for A record")
+    p.add_argument("ip", action="store", type=str, metavar="[ip address]",
+                   help="IP address to which A record will resolve to")
+    p.add_argument("-r", "--region", action="store", required=False,
+                   metavar="[region]", type=str,
+                   help=("Region where container should be created "
+                         "(defaults to 'ORD'"),
+                   choices=["ORD", "DFW", "LON", "IAD", "HKG", "SYD"],
+                   default="ORD")
+    p.add_argument("-t", "--ttl", action="store",
+                   required=False, type=int, metavar="[ttl value]",
+                   help=("TTL for the new record (default %ds)"
+                         % (DEFAULT_TTL)), default=DEFAULT_TTL)
 
     # Parse arguments (validate user input)
-    args = parser.parse_args()
+    args = p.parse_args()
 
     # Determine if IP address provided is formatted correctly
     if not is_valid_ipv4(args.ip):
@@ -188,7 +185,8 @@ def main():
                "%s\n\tTTL: %s") % (rec[0].name, rec[0].type, rec[0].data,
                rec[0].ttl)
     except e.DomainRecordAdditionFailed as err:
-        print "ERROR: Record addition request failed:", err
+        print "ERROR: Record addition request failed:\nReason:", err
+        exit(8)
 
 
 if __name__ == '__main__':
