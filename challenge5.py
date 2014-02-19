@@ -41,7 +41,7 @@ MAX_VOL_SIZE = 150
 #         Since region is part of the argument list, we get into a bit of
 #         a pickle - region is an arg and needs to be parsed before we
 #         can authenticate and grab the flavor list :-/
-RAM_LIST = [ 512, 1024, 2048, 4096, 8192, 16384 ]
+FLAVOUR_LIST = [512, 1024, 2048, 4096, 8192, 16384]
 
 
 def main():
@@ -52,42 +52,46 @@ def main():
        least one user that can connect to it.
     """
     # Parse script parameters
-    parser = argparse.ArgumentParser(description=("Create an Cloud DB "
-                                                  "instance along with a DB "
-                                                   "and management user"))
-    parser.add_argument("-i", "--instance", action="store",
-                        required=True, type=str, metavar="INSTANCE_NAME",
-                        help="Preferred Cloud DB instance name")
-    parser.add_argument("-m", "--ram", action="store", required=False,
-                        type=int, metavar="RAM_SIZE",
-                        help="Preferred RAM size of instance (default 512MB)",
-                        choices=RAM_LIST, default=512)
-    parser.add_argument("-v", "--volume", action="store", required=False,
-                        type=int, metavar="DB_VOLUME_SIZE",
-                        help=("Preferred DB volume size in GB (default "
-                              "1 GB)"), default=1)
-    parser.add_argument("-d", "--db", action="store",
-                        required=False, type=str, metavar="DB_NAME",
-                        help="Preferred DB name (default 'mydb'",
-                        default="mydb")
-    parser.add_argument("-u", "--username", action="store", required=False,
-                        type=str, metavar="DB_USER",
-                        help=("Preferred DB management user (default "
-                              "'dbuser'"), default="dbuser")
-    parser.add_argument("-p", "--password", action="store", required=False,
-                        type=str, metavar="DB_PASS",
-                        help=("Preferred DB user password (default random "
-                              "string"), default=(pyrax.utils.random_name(
-                                         length=10, ascii_only=True)))
-    parser.add_argument("-r", "--region", action="store", required=False,
-                            metavar="REGION", type=str,
-                            help=("Region where container should be created "
-                                  "(defaults to 'ORD'"),
-                                  choices=["ORD", "DFW", "LON"],
-                                  default="ORD")
+    p = argparse.ArgumentParser(description=("Create an Cloud DB instance "
+                                             "along with a DB and management"
+                                             " user"))
+    p.add_argument("instance", action="store", type=str,
+                   metavar="[instance name]",
+                   help="Preferred Cloud DB instance name")
+    p.add_argument("-m", "--memory", action="store", required=False,
+                   type=int, metavar="[size]",
+                   help="Preferred memory size of instance (default 512MB)",
+                   choices=FLAVOUR_LIST, default=512)
+    p.add_argument("-v", "--volume", action="store", required=False,
+                   type=int, metavar="[volume size]",
+                   help="Preferred DB volume size in GB (default 1GB)",
+                   default=1)
+    p.add_argument("-d", "--db", action="store", required=False, type=str,
+                   metavar="[db name]",
+                   help="Preferred DB name (default 'mydb')",
+                   default="mydb")
+    p.add_argument("-u", "--username", action="store", required=False,
+                   type=str, metavar="[db user]",
+                   help=("Preferred DB management user (default "
+                         "'dbuser'"), default="dbuser")
+    p.add_argument("-p", "--password", action="store", required=False,
+                   type=str, metavar="[db password]",
+                   help=("Preferred DB user password (default is a random "
+                         "string"), default=(pyrax.utils.random_ascii(
+                                                length=10)))
+    p.add_argument("-o", "--host", action="store", required=False,
+                   type=str, metavar="[host]",
+                   help=("Host IP address/wildcard for user access (default "
+                         "is '%')"),  default="%")
+    p.add_argument("-r", "--region", action="store", required=False,
+                   metavar="[region]", type=str,
+                   help=("Region where container should be created "
+                         "(defaults to 'ORD'"),
+                   choices=["ORD", "DFW", "LON", "IAD", "HKG", "SYD"],
+                   default="ORD")
 
     # Parse arguments (validate user input)
-    args = parser.parse_args()
+    args = p.parse_args()
 
     # Determine if volume size is in acceptable range
     if args.volume < 1 or args.volume > 150:
@@ -122,11 +126,21 @@ def main():
     cdb = pyrax.cloud_databases
 
     # Determine which flavor was selected and grab the full details
-    flavor = [i for i in cdb.list_flavors() if args.ram == i.ram][0]
+    try:
+        flavor = [i for i in cdb.list_flavors() if args.memory == i.ram][0]
+    except:
+        print ("ERROR: Flavor name provided has not matched any entries. "
+               "Please check and try again.")
+        sys.exit(4)
 
     # Attempt to create the instance
-    print "Creating instance '%s'" % (args.instance)
-    instance = cdb.create(args.instance, flavor=flavor, volume=args.volume)
+    try:
+        print "INFO: Creating instance '%s'" % (args.instance)
+        instance = cdb.create(args.instance, flavor=flavor,
+                                volume=args.volume)
+    except:
+        print "ERROR: Instance creation failed"
+        sys.exit(5)
 
     # Keep checking status until it's something other than 'BUILD'
     while instance.status in ["BUILD"]:
@@ -134,26 +148,30 @@ def main():
         sys.stdout.write(".")
         sys.stdout.flush()
         # Reasonable wait time between status checks
-        sleep(15)
+        sleep(30)
         instance.get()
     print
 
     # Inform the client/user of the outcome
     if instance.status not in ["ACTIVE"]:
-        print ("Something went wrong with the instance build\nStatus: %s"
+        print ("ERROR: Instance build failed\nStatus: %s"
                % instance.status)
-        sys.exit(4)
+        sys.exit(6)
     else:
-        print "Instance creation complete"
+        print "INFO: Instance successfully created"
 
-    # Add the new DB to the instance
-    instance.create_database(args.db)
+    try:
+        # Add the new DB to the instance
+        instance.create_database(args.db)
 
-    # Same for the user
-    instance.create_user(args.username, args.password,
-                                database_names=args.db)
+        # Same for the user
+        instance.create_user(args.username, args.password,
+                                database_names=args.db, host=args.host)
+    except e.BadRequest as err:
+        print "ERROR: DB and user creation failed\nReason:", err
+        sys.exit(7)
 
-    # We're done
+    # We're all done
     print ("-- Details:\n\tDB Host: %s\n\tDB Name: %s\n\tDB User: %s\n\t"
            "DB Password: %s" % (instance.hostname, args.db, args.username,
             args.password))
