@@ -84,8 +84,7 @@ def main():
     p.add_argument("-i", "--image", action="store", required=False,
                    metavar="[server image]", type=str,
                    help=("Image name to be used in server build (defaults to "
-                         " 'Debian 7'"),
-                   default="Debian 7 (Wheezy")
+                         " 'Debian 7')"), default="Debian 7 (Wheezy)")
     p.add_argument("-c", "--count", action="store", required=False,
                    metavar="[server count]", type=int,
                    help="Number of servers to build (defaults to 2)",
@@ -96,9 +95,9 @@ def main():
                          " '-lb' appended)"))
     p.add_argument("-t", "--lb-vip-type", action="store", required=False,
                    metavar="[vip type]", type=str,
-                   help=("Virtual IP address type - PUBLIC or SNET "
+                   help=("Virtual IP address type - PUBLIC or SERVICENET "
                          "(defaults to PUBLIC)"),
-                   choices=["PUBLIC","SNET"], default="PUBLIC")
+                   choices=["PUBLIC","SERVICENET"], default="PUBLIC")
     p.add_argument("-a", "--algorithm", action="store", required=False,
                    metavar="[lb algorithm]", type=str,
                    help="Load balancing algoritm (defaults to RANDOM)",
@@ -153,7 +152,12 @@ def main():
 
     # Grab the flavor ID from the RAM amount selected by the user.
     # The server create request requires the ID rather than RAM amount.
-    flavor = [f for f in cs.flavors.list() if args.flavour == f.name][0]
+    try:
+        flavour = [f for f in cs.flavors.list() if args.flavour == f.name][0]
+    except:
+        print ("ERROR: Flavor name provided has not matched any entries. "
+               "Please check and try again.")
+        exit(4)
     
     # Set the LB name from the args provided
     lbname = args.lb_name if args.lb_name else args.prefix + "lb"
@@ -175,7 +179,7 @@ def main():
     for count in xrange(args.count):
         # Issue the server creation request
         srv = cs.servers.create(args.prefix + str(count + 1),
-                                   image.id, flavor.id)
+                                   image.id, flavour.id)
         # Add server ID from the create request to the tracking list
         servers.append(srv)
 
@@ -219,7 +223,7 @@ def main():
     # an LB
     if len(srv) == 0:
         print "ERROR: No servers in an active state, cannot create LB"
-        exit(4)
+        exit(5)
     else:
         # Otherwise, prepare and add all active nodes
         nodes = []
