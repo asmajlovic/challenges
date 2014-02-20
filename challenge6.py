@@ -41,30 +41,28 @@ def main():
     -- Write a script that creates a CDN-enabled container in Cloud Files
     """
     # Parse script parameters
-    parser = argparse.ArgumentParser(description=("Push local objects "
+    p = argparse.ArgumentParser(description=("Push local objects "
                                                    "to Cloud Files"))
-    parser.add_argument("-d", "--directory", action="store",
-                        required=True, type=str, metavar="LOCAL_DIR",
-                        help="Local directory to upload content from")
-    parser.add_argument("-c", "--container", action="store",
-                        required=True, type=str, metavar="CONTAINER_NAME",
-                        help=("Container name where content should "
-                              "be uploaded"))
-    parser.add_argument("-r", "--region", action="store", required=False,
-                            metavar="REGION", type=str,
-                            help=("Region where container should be created"
-                                  " (defaults to 'ORD'"),
-                                  choices=["ORD", "DFW", "LON"],
-                                  default="ORD")
-    parser.add_argument("-t", "--ttl", action="store", required=False,
-                        type=int, help=(("CDN TTL (in seconds) for the "
-                              "container (default %d seconds)") % (MIN_TTL)),
-                               default=MIN_TTL)
-    parser.add_argument("-f", "--force", action="store_true",
-                        required=False, help=("Permit upload to an "
-                        "existing container"))
+    p.add_argument("directory", action="store", type=str,
+                   metavar="[local dir]",
+                   help="Local directory to upload content from")
+    p.add_argument("container", action="store", type=str,
+                   metavar="[container name]",
+                   help="Container name where content should be uploaded")
+    p.add_argument("-r", "--region", action="store", required=False,
+                   metavar="[region]", type=str,
+                   help=("Region where container should be created"
+                         " (defaults to 'ORD'"),
+                   choices=["ORD", "DFW", "LON", "IAD", "HKG", "SYD"],
+                   default="ORD")
+    p.add_argument("-t", "--ttl", action="store", required=False, type=int,
+                   help=("CDN TTL for the container (default '%d seconds')" %
+                          (MIN_TTL)), default=MIN_TTL)
+    p.add_argument("-f", "--force", action="store_true",
+                   required=False, help=("Permit upload to an "
+                   "existing container"))
 
-    args = parser.parse_args()
+    args = p.parse_args()
 
     # Determine if the upload directory exists
     if not os.path.isdir(args.directory):
@@ -105,7 +103,7 @@ def main():
 
     # Determine if container already exists, otherwise create it
     try:
-        print "Checking if container already exists..."
+        print "INFO: Checking if container already exists..."
         cont = cf.get_container(args.container)
     except:
         cont = None
@@ -113,8 +111,8 @@ def main():
     # Container not found, create it and CDN enable
     if cont is None:
         try:
-            print ("Container '%s' not found, creating with TTL set to %d..."
-                   % (args.container, args.ttl))
+            print ("INFO: Container '%s' not found, creating with TTL set "
+                   "to %d..." % (args.container, args.ttl))
             cont = cf.create_container(args.container)
             cont.make_public(ttl=args.ttl)
         except:
@@ -123,20 +121,20 @@ def main():
     # Otherwise inform the user/client that the directory exists and
     # determine if we can proceed (is the overwrite flag set)
     else:
-        print ("Container '%s' found with TTL set to %d"
+        print ("INFO: Container '%s' found with TTL set to %d"
                % (cont.name, cont.cdn_ttl))
         if args.force:
-            print "Proceeding as upload has been forced"
+            print "INFO: Proceeding as force flag is set"
         else:
-            print "Force flag not set, exiting..."
+            print "INFO: Force flag not set, exiting..."
             sys.exit(6)
 
     # Start the upload
-    print "Beginning directory/folder upload"
+    print "INFO: Beginning directory/folder upload"
     (upload_key, total_bytes) = cf.upload_folder(args.directory, cont)
 
     # Inform the user of the total upload size
-    print ("Total upload size: %d bytes (%.2f MB)"
+    print ("INFO: Total upload size: %d bytes (%.2f MB)"
            % (total_bytes, total_bytes / 1024.0 / 1024))
 
     # Prepare progress toolbar
@@ -158,11 +156,11 @@ def main():
 
     # Upload completed, print object count and CDN URIs
     objs = cf.get_container_object_names(cont)
-    print "Number of objects uploaded: %d" % (len(objs))
-    print ("CDN links\nHTTP: %s\nHTTPS: %s\nStreaming: %s\niOS streaming: %s"
-           % (cont.cdn_uri, cont.cdn_ssl_uri, cont.cdn_streaming_uri,
-              cont.cdn_ios_uri))
-    print "Upload complete"
+    print "INFO: Number of objects uploaded: %d" % (len(objs))
+    print ("\nCDN links:\n\tHTTP: %s\n\tHTTPS: %s\n\tStreaming: %s\n\tiOS "
+           "streaming: %s\n" % (cont.cdn_uri, cont.cdn_ssl_uri,
+                                  cont.cdn_streaming_uri, cont.cdn_ios_uri))
+    print "INFO: Upload completed successfully"
 
 
 if __name__ == '__main__':
