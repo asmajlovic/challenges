@@ -22,6 +22,7 @@ from time import sleep
 
 import pyrax
 from pyrax import exceptions as e
+from novaclient import exceptions as exc
 
 # Location of pyrax configuration file
 CONFIG_FILE = "~/.rackspace_cloud_credentials"
@@ -76,14 +77,14 @@ def check_lb_status(obj):
     Check LB status and freak out if not active
     """
     # We need to confirm that the LB is active before making any
-    # additional changes, 5 second sleep is reasonable
+    # additional changes, 10 second sleep is more than reasonable
     while obj.status not in ["ACTIVE", "ERROR"]:
-        sleep(5)
+        sleep(10)
         obj.get()
         
     if obj.status not in ["ACTIVE"]:
         print "ERROR: LB not in an active status"
-        exit(12)
+        exit(14)
     
     return
 
@@ -103,84 +104,99 @@ def main():
    # Variable to determine if build errors were encountered
     ERRORS = False
 
-    # Compile a list of available RAM sizes for use in argument parsing
+    # Compile a list of available flavours for use in argument parsing
     # later on. The choices permitted will be made up of this list.
-    #    NOTE: Should revisit to make more dynamic for if and when
-    #          the list is updated
-    FLAVOR_LIST = [ 512, 1024, 2048, 4096, 8192, 15360, 30720 ]
+    #    NOTE: Should revisit to make more dynamic and account for any
+    #          flavour updates
+    FLAVOUR_LIST = [
+                    "512MB Standard", 
+                    "1GB Standard",
+                    "2GB Standard",
+                    "4GB Standard",
+                    "8GB Standard",
+                    "15GB Standard",
+                    "30GB Standard",
+                    "1 GB Performance",
+                    "2 GB Performance",
+                    "4 GB Performance",
+                    "8 GB Performance",
+                    "15 GB Performance",
+                    "30 GB Performance",
+                    "60 GB Performance",
+                    "90 GB Performance",
+                    "120 GB Performance"
+                    ]
     
     # Compile a list of available LB algorithms (similar to above)
-    ALG_LIST = ["LEAST_CONNECTIONS", "RANDOM", "ROUND_ROBIN",
-                "WEIGHTED_LEAST_CONNECTIONS", "WEIGHTED_ROUND_ROBIN"]
+    ALGORITHM_LIST = [
+                      "LEAST_CONNECTIONS",
+                      "RANDOM",
+                      "ROUND_ROBIN",
+                      "WEIGHTED_LEAST_CONNECTIONS",
+                      "WEIGHTED_ROUND_ROBIN"
+                     ]
 
     # Define the script parameters (all are optional for the time being)
-    parser = argparse.ArgumentParser(description=("Provisioning Cloud Servers"
-                                                  " behind HTTP LB with "
-                                                  "health checks and custom "
-                                                  "error page as well as "
-                                                  "A record resolving to "
-                                                  "LB IP address"))
-    parser.add_argument("-q", "--fqdn", action="store",
-                        required=True, type=str, metavar="FQDN",
-                        help="Fully qualified domain name for A record")
-    parser.add_argument("-k", "--ssh-key", action="store", required=True,
-                        metavar="PUBLIC_SSH_KEY", type=str,
-                        help=("SSH public key file to be placed in "
-                              "/root/.ssh/authorized_keys"))
-    parser.add_argument("-x", "--prefix", action="store", required=False,
-                        metavar="SERVER_NAME_PREFIX", type=str,
-                        help=("Server name prefix (defaults to 'server' e.g."
-                              " server01, server02, ...)"), default="server")
-    parser.add_argument("-s", "--size", action="store", required=False,
-                        metavar="SERVER_RAM_SIZE", type=int,
-                        help=("Server flavor (RAM size in MB, defaults to "
-                              "'512')"), choices=FLAVOR_LIST, default=512)
-    parser.add_argument("-i", "--image", action="store", required=False,
-                        metavar="SERVER_IMAGE", type=str,
-                        help=("Image ID to be used in server build (defaults"
-                              " to '92a28e50-181d-4fc7-a071-567d26fc95f6' - "
-                              "Debian Squeeze"),
-                              default="92a28e50-181d-4fc7-a071-567d26fc95f6")
-    parser.add_argument("-c", "--count", action="store", required=False,
-                        metavar="SERVER_COUNT", type=int,
-                        help="Number of servers to build (defaults to 2)",
-                        choices=range(1,11), default=2)
-    parser.add_argument("-n", "--lb-name", action="store", required=False,
-                        metavar="LB_NAME", type=str,
-                        help=("Preferred LB name (defaults to server prefix)"
-                              " with '-lb' appended)"))
-    parser.add_argument("-v", "--lb-vip-type", action="store",
-                        required=False, metavar="LB_VIP_TYPE", type=str,
-                        help=("Virtual IP address type - PUBLIC or "
-                              "SERVICENET (defaults to PUBLIC)"),
-                              choices=["PUBLIC","SERVICENET"],
-                              default="PUBLIC")
-    parser.add_argument("-a", "--algorithm", action="store", required=False,
-                        metavar="LB_ALGORITHM", type=str,
-                        help="Load balancing algoritm (defaults to RANDOM)",
-                              choices=ALG_LIST, default="RANDOM")
-    parser.add_argument("-p", "--service-port", action="store",
-                        required=False, metavar="LB_PORT", type=int,
-                        help="Service port - HTTP (defaults to 80)",
-                        default=80)
-    parser.add_argument("-o", "--container", action="store",
-                        required=False, type=str, metavar="CONTAINER_NAME",
-                        help=("Container name where LB error page "
-                              "(error.html) should be backed up (default "
-                              "'lb-page-backup')"), default="lb-page-backup")
-    parser.add_argument("-t", "--ttl", action="store", required=False,
-                        type=int, help=(("TTL (in seconds) for the LB A "
-                              "record (default %d)") % (DEFAULT_TTL)),
-                               default=DEFAULT_TTL)
-    parser.add_argument("-r", "--region", action="store", required=False,
-                            metavar="REGION", type=str,
-                            help=("Region where container should be created"
-                                  " (defaults to 'ORD'"),
-                                  choices=["ORD", "DFW", "LON"],
-                                  default="ORD")
+    p = argparse.ArgumentParser(description=(
+        "Provisioning Cloud Servers behind HTTP LB with health checks and "
+        "custom error page, as well as A record resolving to LB IP address"))
+    p.add_argument("fqdn", action="store", type=str, metavar="[fqdn]",
+                   help="Fully qualified domain name for A record")
+    p.add_argument("ssh_key", type=str, metavar="[ssh public key]",
+                   help=("SSH public key file to be placed in "
+                         "/root/.ssh/authorized_keys"))
+    p.add_argument("-x", "--prefix", action="store", required=False,
+                   metavar="[server name prefix]", type=str,
+                   help=("Server name prefix (defaults to 'server' e.g."
+                         " server-1, server-2, ...)"), default="server-")
+    p.add_argument("-f", "--flavour", action="store", required=False,
+                   metavar="[server flavour]", type=str,
+                   help=("Server flavor (RAM size in MB, defaults to "
+                         "'1 GB Performance'"), choices=FLAVOUR_LIST,
+                   default="1 GB Performance")
+    p.add_argument("-i", "--image", action="store", required=False,
+                   metavar="[server image]", type=str,
+                   help=("Image name to be used in server build (defaults to "
+                         " 'Debian 7')"), default="Debian 7 (Wheezy)")
+    p.add_argument("-c", "--count", action="store", required=False,
+                   metavar="[server count]", type=int,
+                   help="Number of servers to build (defaults to 2)",
+                   choices=xrange(1,11), default=2)
+    p.add_argument("-n", "--lb-name", action="store", required=False,
+                   metavar="[lb name]", type=str,
+                   help=("Preferred LB name (defaults to server prefix"
+                         " with 'lb' appended)"))
+    p.add_argument("-v", "--lb-vip-type", action="store", required=False,
+                   metavar="[vip type]", type=str,
+                   help=("Virtual IP address type - PUBLIC or SERVICENET "
+                         "(defaults to PUBLIC)"),
+                   choices=["PUBLIC","SERVICENET"], default="PUBLIC")
+    p.add_argument("-a", "--algorithm", action="store", required=False,
+                   metavar="[lb algorithm]", type=str,
+                   help="Load balancing algoritm (defaults to RANDOM)",
+                   choices=ALGORITHM_LIST, default="RANDOM")
+    p.add_argument("-p", "--service-port", action="store", required=False,
+                   metavar="[lb port]", type=int,
+                   help="LB HTTP service port (defaults to 80)", default=80)
+    p.add_argument("-o", "--container", action="store", required=False,
+                   metavar="[container name]", type=str,
+                   help=("Container name where LB error page (error.html) "
+                         "should be backed up (default 'lb-page-backup')"),
+                   default="lb-page-backup")
+    p.add_argument("-t", "--ttl", action="store", required=False,
+                   metavar="[ttl value]", type=int,
+                   help=("TTL for the DNS A record (default %d seconds)"
+                            % (DEFAULT_TTL)),
+                   default=DEFAULT_TTL)
+    p.add_argument("-r", "--region", action="store", required=False,
+                   metavar="[region]", type=str,
+                   help=("Region where container should be created"
+                         " (defaults to 'ORD'"),
+                   choices=["ORD", "DFW", "LON", "IAD", "HKG", "SYD"],
+                   default="ORD")
 
     # Parse arguments (validate user input)
-    args = parser.parse_args()
+    args = p.parse_args()
 
     # Determine if the FQDN is correctly formated (at least three segments
     # separated by '.' are required).
@@ -208,24 +224,24 @@ def main():
     else:
         ttl = DEFAULT_TTL
     
-    # Check the SSH public key file exists
+    # Confirm that the SSH public key file exists and looks correctly
+    # formatted (presence of 'ssh-' somewhere in the file)
+    #    NOTE: I suspect this string check can be handled better
     try:
         f = open(os.path.expanduser(args.ssh_key), "r")
         ssh_key = f.read()
         f.close()
+        
+        if "ssh-" not in ssh_key:
+            print ("ERROR: SSH public key does not appear to be "
+                   "correctly formatted.")
+            exit(3)
+        else:
+            files = {"/root/.ssh/authorized_keys": ssh_key}
     except IOError:
         print ("ERROR: SSH public key file (%s) not found"
                % (args.ssh_key))
-
-    # Check that at least it looks correctly formatted (presence of 'ssh-' 
-    # somewhere in the file)
-    #    NOTE: I suspect this string check can be handled better
-    if "ssh-" not in ssh_key:
-        print ("ERROR: SSH public key does not appear to be "
-               "correctly formatted.")
         exit(4)
-    else:
-        files = {"/root/.ssh/authorized_keys": ssh_key}
 
     # Define the authentication credentials file location and request that pyrax
     # makes use of it. If not found, let the client/user know about it.
@@ -258,15 +274,20 @@ def main():
     
     # Locate the image to build from (confirm it exists)
     try:
-        image = [i for i in cs.images.list() if args.image in i.id][0]
+        image = [i for i in cs.images.list() if args.image in i.name][0]
     except:
-        print ("ERROR: Image ID provided was not found. Please check "
+        print ("ERROR: Image name provided was not found. Please check "
                "and try again")
         exit(7)
 
     # Grab the flavor ID from the RAM amount selected by the user.
     # The server create request requires the ID rather than RAM amount.
-    flavor = [f for f in cs.flavors.list() if args.size == f.ram][0]
+    try:
+        flavour = [f for f in cs.flavors.list() if args.flavour in f.name][0]
+    except:
+        print ("ERROR: Flavor name provided has not matched any entries. "
+               "Please check and try again.")
+        exit(8)
 
     # Grab zone list
     domains = zone_list(dns)
@@ -275,7 +296,7 @@ def main():
     if len(domains) == 0:
         print "ERROR: You have no domains/zones at this time"
         print "Please create one first then try again"
-        exit(8)
+        exit(9)
 
     # Attempt to locate the zone extracted from FQDN string
     try:
@@ -283,42 +304,37 @@ def main():
     except:
         print "ERROR: Zone '%s' not found" % (zone_name)
         print "Please check/create and try again"
-        exit(9)
+        exit(10)
     
     # Determine the LB name from the args provided
-    if args.lb_name:
-        lbname = args.lb_name
-    else:
-        lbname = args.prefix + "-lb"
+    lbname = args.lb_name if args.lb_name else args.prefix + "lb"
 
-    print ("\nBuild requests initiated\n"
-           "TIP: You may wish to check available options by issuing "
+    print ("\nINFO:Build requests initiated\n"
+           "\tTIP: You may wish to check available options by issuing "
            "the -h flag")
 
     # Print the image ID and name selected, as well as server count
     print "\n-- Image details\n\tID: %s\n\tName: %s" % (image.id, image.name)
-    print ("\n-- Server build details\n\tPrefix: %s\n\tSize: %d MB"
-           "\n\tCount: %d" % (args.prefix, args.size, args.count))
+    print ("\n-- Server build details\n\tPrefix: %s\n\tFlavour: %s"
+           "\n\tCount: %d" % (args.prefix, args.flavour, args.count))
 
     # Server list definition to be used in tracking build status/comletion
     servers = []
 
     # Iterate through the server count specified, sending the build request
     # for each one in turn (concurrent builds)
-    count = 1
-    while count <= args.count:
+    for count in xrange(args.count):
         # Issue the server creation request with the SSH key included
         try:
-            srv = cs.servers.create(args.prefix + str(count),
-                                    image.id, flavor.id, files=files)
+            srv = cs.servers.create(args.prefix + str(count + 1),
+                                    image.id, flavour.id, files=files)
         # SSH key too large, fail
-        except err.OverLimit as error:
-            print "ERROR: SSH public key too large - ", error
-            exit(10)
+        except exc.OverLimit:
+            print "ERROR: SSH public key exceeds permitted size"
+            exit(11)
         
         # Add server ID from the create request to the tracking list
         servers.append(srv)
-        count += 1
 
     # Prepare a list for all active servers, since failed entries will
     # not be removed as we do not have health checks defined just yet
@@ -346,7 +362,7 @@ def main():
                 # Failed build, state so to the client/user
                 if server.status not in ["ACTIVE"]:
                     ERRORS = True
-                    print "WARN: Something went wrong with the build request"
+                    print "WARN: Build process for %s failed" % (server.name)
                 # Otherwise append to the active list to be added to the LB
                 else:
                     srv.append(server)
@@ -360,7 +376,7 @@ def main():
     # an LB
     if len(srv) == 0:
         print "ERROR: No servers in an active state, cannot create LB"
-        exit(11)
+        exit(12)
     else:
         # Otherwise, prepare and add all active nodes
         nodes = []
@@ -372,6 +388,7 @@ def main():
         vip = clb.VirtualIP(type=args.lb_vip_type)
         
         # Create the LB
+        print "INFO: Creating the load balancer"
         lb = clb.create(lbname, port=args.service_port, protocol="HTTP",
                         nodes=nodes, virtual_ips=[vip])
         
@@ -388,7 +405,7 @@ def main():
         
         # Add a custom LB error page
         html = ("<html><head><title>Application error</title></head><body>"
-                "Something is not right here!</body></html>")
+                "Something is not quite right here!</body></html>")
         
         lb.set_error_page(html)
 
@@ -423,10 +440,11 @@ def main():
                    rec[0].ttl)
         except e.DomainRecordAdditionFailed as err:
             print "ERROR: Record addition request failed:", err
+            exit(13)
 
         # Save the error page to a CF container (backup)
         try:
-            print "\nChecking if backup container already exists..."
+            print "\nINFO: Checking if backup container already exists..."
             cont = cf.get_container(args.container)
         except:
             cont = None
@@ -434,14 +452,14 @@ def main():
         # Container not found, create it and CDN enable
         if cont is None:
             try:
-                print ("Container '%s' not found, creating..."
+                print ("INFO: Container '%s' not found, creating..."
                        % (args.container))
                 cont = cf.create_container(args.container)
             except:
                 print "ERROR: Could not create CF container", args.container
                 ERRORS = True
         else:
-            print "Container found, back up in progress..."
+            print "INFO: Container found, back up in progress..."
                     
         # Write the error HTML to a temp file and upload to CF container
         # (should it have been created successfully of course)
@@ -453,11 +471,11 @@ def main():
                     cf.upload_file(cont, custom_error_file,
                                    content_type="text/html")
                 
-                    print ("Custom error page backed up to '%s'"
+                    print ("INFO: Custom error page backed up to '%s'"
                             % (args.container + "/" + filename))
             
         # All done
-        exit_msg = "\nBuild requests completed"
+        exit_msg = "\nINFO: Build requests completed"
         if ERRORS:
             print "%s - with errors (see above for details)" % (exit_msg)
         else:
