@@ -76,8 +76,8 @@ def main():
                               default="ORD")
     parser.add_argument("-i", "--image", action="store", required=False,
                         metavar="[image name]", type=str,
-                        help=("Image name to be used in server build (defaults"
-                              " (defaults to 'Debian 7'"),
+                        help=("Image name to be used in server build "
+                              "(defaults to 'Debian 7')"),
                               default="Debian 7 (Wheezy)")
     parser.add_argument("-f", "--flavour", action="store", required=False,
                         metavar="[flavour name]", type=str,
