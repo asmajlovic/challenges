@@ -82,42 +82,57 @@ def main():
     # Variable to determine if build errors were encountered
     ERRORS = False
 
-    # Compile a list of available RAM sizes for use in argument parsing
+    # Compile a list of available flavours for use in argument parsing
     # later on. The choices permitted will be made up of this list.
-    #    NOTE: Should revisit to make more dynamic for if and when
-    #          the list is updated
-    FLAVOR_LIST = [512, 1024, 2048, 4096, 8192, 15360, 30720]
+    #    NOTE: Should revisit to make more dynamic and account for any
+    #          flavour updates
+    FLAVOUR_LIST = [
+                    "512MB Standard", 
+                    "1GB Standard",
+                    "2GB Standard",
+                    "4GB Standard",
+                    "8GB Standard",
+                    "15GB Standard",
+                    "30GB Standard",
+                    "1 GB Performance",
+                    "2 GB Performance",
+                    "4 GB Performance",
+                    "8 GB Performance",
+                    "15 GB Performance",
+                    "30 GB Performance",
+                    "60 GB Performance",
+                    "90 GB Performance",
+                    "120 GB Performance"
+                    ]
 
     # Parse script parameters
-    parser = argparse.ArgumentParser(description=("Create a server using "
-                                                  "FQDN and IP address "
-                                                   "parameters"))
-    parser.add_argument("-f", "--fqdn", action="store",
-                        required=True, type=str, metavar="FQDN",
-                        help="Fully qualified domain name for A record")
-    parser.add_argument("-i", "--image", action="store", required=False,
-                        metavar="SERVER_IMAGE", type=str,
-                        help=("Image ID to be used in server build (defaults"
-                              " to '92a28e50-181d-4fc7-a071-567d26fc95f6' - "
-                              "Debian Squeeze"),
-                              default="92a28e50-181d-4fc7-a071-567d26fc95f6")
-    parser.add_argument("-s", "--size", action="store", required=False,
-                        metavar="SERVER_RAM_SIZE", type=int,
-                        help=("Server RAM size in megabytes (defaults to "
-                              "'512')"), choices=FLAVOR_LIST, default=512)
-    parser.add_argument("-r", "--region", action="store", required=False,
-                            metavar="REGION", type=str,
-                            help=("Region where container should be created "
-                                  "(defaults to 'ORD'"),
-                                  choices=["ORD", "DFW", "LON"],
-                                  default="ORD")
-    parser.add_argument("-t", "--ttl", action="store",
-                        required=False, type=int, metavar="TTL_VALUE",
-                        help=("TTL for the new record (default %ds)"
-                             % (DEFAULT_TTL)), default=DEFAULT_TTL)
+    p = argparse.ArgumentParser(description=("Create a server using FQDN and "
+                                             "IP address parameters"))
+    p.add_argument("fqdn", action="store", type=str, metavar="[fqdn]",
+                   help="Fully qualified domain name for A record")
+    p.add_argument("-i", "--image", action="store", required=False,
+                   metavar="[server image]", type=str,
+                   help=("Image name to be used in server build "
+                         "(defaults to 'Debian 7')"),
+                   default="Debian 7 (Wheezy)")
+    p.add_argument("-f", "--flavour", action="store", required=False,
+                   metavar="[server flavour]", type=str,
+                   help=("Server flavour name (defaults to "
+                         "'1 GB Performance')"), choices=FLAVOUR_LIST,
+                   default="1 GB Performance")
+    p.add_argument("-r", "--region", action="store", required=False,
+                   metavar="[region]", type=str,
+                   help=("Region where container should be created "
+                         "(defaults to 'ORD'"),
+                   choices=["ORD", "DFW", "LON", "IAD", "HKG", "SYD"],
+                   default="ORD")
+    p.add_argument("-t", "--ttl", action="store", required=False,
+                   type=int, metavar="[ttl value]",
+                   help=("TTL for the new record (default %d seconds)"
+                          % (DEFAULT_TTL)), default=DEFAULT_TTL)
 
     # Parse arguments (validate user input)
-    args = parser.parse_args()
+    args = p.parse_args()
 
     # Determine if the FQDN is correctly formated (at least three segments
     # separated by '.' are required).
@@ -130,7 +145,7 @@ def main():
                "and try again")
         print ("Base zone/domain in the format 'example.com' will not be "
                "accepted")
-        exit(2)
+        exit(1)
     # All is apparently well, define the zone/domain using the FQDN string
     else:
         zone_name = '.'.join(segments[-(len(segments)-1):])
@@ -141,7 +156,7 @@ def main():
         if not ttl:
             print ("ERROR: TTL must be an integer greater or equal to %d"
                    % (DEFAULT_TTL))
-            exit(3)
+            exit(2)
     else:
         ttl = DEFAULT_TTL
 
@@ -161,10 +176,10 @@ def main():
     except e.AuthenticationFailed:
         print ("ERROR: Authentication failed. Please check and confirm "
                "that the API username, key, and region are in place and correct.")
-        exit(4)
+        exit(3)
     except e.FileNotFound:
         print "ERROR: Credentials file '%s' not found" % (creds_file)
-        exit(5)
+        exit(4)
 
     # Use a shorter Cloud Servers and DNS class reference strings
     # This simplifies invocation later on (less typing)
@@ -178,7 +193,7 @@ def main():
     if len(domains) == 0:
         print "ERROR: You have no domains/zones at this time"
         print "Please create one first then try again"
-        exit(6)
+        exit(5)
 
     # Attempt to locate the zone extracted from FQDN string
     try:
@@ -186,24 +201,29 @@ def main():
     except:
         print "ERROR: Zone '%s' not found" % (zone_name)
         print "Please check/create and try again"
-        exit(7)
+        exit(6)
 
     # Locate the image to build from (confirm it exists)
     try:
-        image = [i for i in cs.images.list() if args.image in i.id][0]
+        image = [i for i in cs.images.list() if args.image in i.name][0]
     except:
-        print ("ERROR: Image ID provided was not found. Please check "
+        print ("ERROR: Image name provided was not found. Please check "
                "and try again")
-        exit(8)
+        exit(7)
 
-    # Grab the flavor ID from the RAM amount selected by the user.
-    # The server create request requires the ID rather than RAM amount.
-    flavor = [f for f in cs.flavors.list() if args.size == f.ram][0]
+    # Grab the flavor ID from the flavour name selected by the user.
+    # The server create request requires the relevant ID.
+    try:
+        flavor = [f for f in cs.flavors.list() if args.flavour in f.name][0]
+    except:
+        print ("ERROR: Flavor name provided has not matched any entries. "
+               "Please check and try again.")
+        exit(8)
 
     # Print the image ID and name selected along with chosen RAM size
     print "-- Image details\n\tID: %s\n\tName: %s" % (image.id, image.name)
-    print ("\n-- Server build details\n\tName: %s\n\tSize: %d MB"
-           % (args.fqdn, args.size))
+    print ("\n-- Server build details\n\tName: %s\n\tFlavour: %s"
+           % (args.fqdn, args.flavour))
 
     # Attempt to build the server and track progress
     print "\nBuilding server..."
@@ -215,9 +235,9 @@ def main():
 
     # Server build has issues, show the status
     if srv.status not in ["ACTIVE"]:
-        print ("Something went wrong during the server creation\nPlease "
-               "review the output below:\n\tID: %s\n\tName: %s\n\tStatus: "
-               "%s\n" % (srv.id, srv.name, srv.status))
+        print ("WARN: Something went wrong during the server creation\n"
+               "Please review the output below:\n\tID: %s\n\tName: %s\n\t"
+               "Status: %s\n" % (srv.id, srv.name, srv.status))
     # All is well with the server build
     else:
         print ("\n-- Server details\n\tName: %s\n\tStatus: %s"
@@ -249,8 +269,10 @@ def main():
         print ("\n-- Record details\n\tName: %s\n\tType: %s\n\tIP address: "
                "%s\n\tTTL: %s") % (rec[0].name, rec[0].type,
                                     rec[0].data, rec[0].ttl)
+        print "INFO: All requests completed successfully"
     except e.DomainRecordAdditionFailed as err:
-        print "Record creation failed:", err
+        print "ERROR: Record creation failed:", err
+        exit(9)
 
 
 if __name__ == '__main__':
